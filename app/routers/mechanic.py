@@ -18,7 +18,6 @@ router = APIRouter(prefix="/mechanic", tags=["mechanic"])
 
 @router.post("/login", response_model=MechanicResponse)
 def mechanic_login(login_data: MechanicLogin, db: Session = Depends(get_db)):
-    # Find mechanic by phone
     mechanic = db.query(Mechanic).filter(Mechanic.phone == login_data.phone).first()
 
     if not mechanic:
@@ -27,28 +26,24 @@ def mechanic_login(login_data: MechanicLogin, db: Session = Depends(get_db)):
             detail="Invalid phone, password, or access code",
         )
 
-    # Check if account is active
     if not mechanic.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is inactive. Contact administrator.",
         )
 
-    # Verify password
     if not verify_password(login_data.password, mechanic.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid phone, password, or access code",
         )
 
-    # Verify access code
     if login_data.access_code != mechanic.access_code:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid phone, password, or access code",
         )
 
-    # Generate mechanic JWT token
     token = create_mechanic_token(mechanic.id, mechanic.phone)
 
     return MechanicResponse(
@@ -66,10 +61,8 @@ def get_mechanic_bookings(
     current_mechanic: Mechanic = Depends(get_current_mechanic),
     db: Session = Depends(get_db),
 ):
-    # Get all bookings assigned to this mechanic
     bookings = (
         db.query(Booking)
-        .filter(Booking.assigned_mechanic_id == current_mechanic.id)
         .filter(Booking.status == "active")
         .order_by(Booking.created_at.desc())
         .all()
@@ -113,7 +106,6 @@ def complete_booking(
     current_mechanic: Mechanic = Depends(get_current_mechanic),
     db: Session = Depends(get_db),
 ):
-    # Find booking
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
 
     if not booking:
@@ -122,21 +114,12 @@ def complete_booking(
             detail="Booking not found",
         )
 
-    # Check if booking is assigned to this mechanic
-    if booking.assigned_mechanic_id != current_mechanic.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Booking is not assigned to you",
-        )
-
-    # Check if booking is active
     if booking.status != "active":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Booking is already completed or cancelled",
         )
 
-    # Mark as completed
     booking.status = "completed"
     db.commit()
 
@@ -153,5 +136,5 @@ def get_mechanic_profile(
         phone=current_mechanic.phone,
         rating=current_mechanic.rating,
         is_available=current_mechanic.is_available,
-        access_token="",  # Don't return token for profile fetch
+        access_token="",
     )
