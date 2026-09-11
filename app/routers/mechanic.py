@@ -79,7 +79,7 @@ def get_mechanic_bookings(
                 id=booking.id,
                 customer_name=customer.name if customer else "Unknown",
                 customer_phone=customer.phone if customer else "Unknown",
-                customer_address=customer.address if customer else "",
+                customer_address=customer.address if (customer and customer.address) else "",
                 service_name=service.name if service else "Unknown",
                 service_category=service.category if service else "Unknown",
                 service_price=service.price if service else 0,
