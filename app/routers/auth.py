@@ -269,3 +269,40 @@ def change_password(
     db.commit()
 
     return {"success": True, "message": "Password changed successfully"}
+
+    @router.get("/profile")
+def get_profile(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "id": user.id,
+        "name": user.name,
+        "phone": user.phone,
+        "email": user.email,
+        "address": user.address or "",
+    }
+
+
+@router.put("/profile")
+def update_profile(
+    profile_data: dict,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if "name" in profile_data:
+        user.name = profile_data["name"]
+    if "phone" in profile_data:
+        user.phone = profile_data["phone"]
+    if "email" in profile_data:
+        user.email = profile_data["email"]
+
+    db.commit()
+    return {"success": True, "message": "Profile updated successfully"}
