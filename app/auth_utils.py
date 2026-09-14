@@ -12,7 +12,7 @@ import os
 # Secret key for JWT
 SECRET_KEY = os.getenv("SECRET_KEY", "fixnow_secret_key_2024")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 365 * 100  # 100 years
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
