@@ -160,7 +160,6 @@ def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
         )
 
     clear_attempts(phone)
-
     token = create_token(user.id, user.phone)
 
     return schemas.LoginResponse(
@@ -237,7 +236,6 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
 
     user.password = hash_password(request.new_password)
     db.commit()
-
     del reset_codes[request.email]
 
     return {"success": True, "message": "Password reset successfully"}
@@ -270,7 +268,8 @@ def change_password(
 
     return {"success": True, "message": "Password changed successfully"}
 
-    @router.get("/profile")
+
+@router.get("/profile")
 def get_profile(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
