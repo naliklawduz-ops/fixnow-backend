@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 import os
 
 from .database import engine, Base, SessionLocal
-from .routers import auth, cars, services, bookings, chat, mechanic, admin
+from .routers import auth, cars, services, bookings, chat, mechanic, admin, maintenance
 from .routers.admin import seed_default_admin
 
 # ─── Create tables ───────────────────────────────────────────
@@ -51,6 +51,7 @@ app.include_router(bookings.router)
 app.include_router(chat.router)
 app.include_router(mechanic.router)
 app.include_router(admin.router)
+app.include_router(maintenance.router)
 
 
 @app.get("/")

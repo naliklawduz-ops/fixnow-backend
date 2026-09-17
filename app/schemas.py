@@ -64,6 +64,8 @@ class CarCreate(BaseModel):
     year: int
     color: str
     plate: str
+    current_km: Optional[int] = None
+    estimated_km_per_month: Optional[int] = 1000
 
 
 class CarResponse(BaseModel):
@@ -74,10 +76,17 @@ class CarResponse(BaseModel):
     year: int
     color: str
     plate: str
+    current_km: Optional[int] = None
+    estimated_km_per_month: Optional[int] = 1000
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class CarKmUpdate(BaseModel):
+    current_km: int = Field(ge=0)
+    estimated_km_per_month: Optional[int] = Field(default=None, ge=0)
 
 
 # ============ SERVICE SCHEMAS ============
@@ -171,3 +180,129 @@ class MessageResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============ MAINTENANCE SCHEMAS ============
+
+# ----- Admin: Parts -----
+class MaintenancePartCreate(BaseModel):
+    name: str
+    default_interval_km: int = Field(gt=0)
+    service_id: Optional[int] = None
+    is_active: bool = True
+
+
+class MaintenancePartUpdate(BaseModel):
+    name: Optional[str] = None
+    default_interval_km: Optional[int] = Field(default=None, gt=0)
+    service_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class MaintenancePartResponse(BaseModel):
+    id: int
+    name: str
+    default_interval_km: int
+    service_id: Optional[int] = None
+    is_active: bool
+    created_at: datetime
+    brands: List["MaintenanceBrandResponse"] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ----- Admin: Brands -----
+class MaintenanceBrandCreate(BaseModel):
+    part_id: int
+    brand_name: str
+    interval_km: int = Field(gt=0)
+    is_active: bool = True
+
+
+class MaintenanceBrandUpdate(BaseModel):
+    brand_name: Optional[str] = None
+    interval_km: Optional[int] = Field(default=None, gt=0)
+    is_active: Optional[bool] = None
+
+
+class MaintenanceBrandResponse(BaseModel):
+    id: int
+    part_id: int
+    brand_name: str
+    interval_km: int
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ----- Customer: Car Maintenance Status -----
+class MaintenanceItemStatus(BaseModel):
+    """Status of a single maintenance part for a specific car."""
+    part_id: int
+    part_name: str
+    last_changed_km: Optional[int] = None
+    last_changed_at: Optional[datetime] = None
+    last_changed_brand_id: Optional[int] = None
+    last_changed_brand_name: Optional[str] = None
+    next_change_km: Optional[int] = None
+    km_remaining: Optional[int] = None
+    status: str  # "green" | "yellow" | "red" | "unknown"
+    source: Optional[str] = None
+    service_id: Optional[int] = None
+    service_category: Optional[str] = None
+    estimated_months_remaining: Optional[float] = None
+    available_brands: List[MaintenanceBrandResponse] = []
+
+
+class CarMaintenanceSummary(BaseModel):
+    """Full maintenance status for a car."""
+    car_id: int
+    car_name: str  # e.g. "Toyota Corolla 2018"
+    current_km: Optional[int] = None
+    estimated_km_per_month: Optional[int] = 1000
+    total_parts: int
+    red_count: int
+    yellow_count: int
+    green_count: int
+    items: List[MaintenanceItemStatus] = []
+
+
+# ----- Manual Reset by Customer -----
+class CarMaintenanceResetRequest(BaseModel):
+    """Customer manually marks a part as changed."""
+    last_changed_km: int = Field(ge=0)
+    brand_id: Optional[int] = None
+
+
+# ----- Mechanic: Complete with Brand -----
+class CompleteWithBrandRequest(BaseModel):
+    """Mechanic completes a booking and optionally records the brand used."""
+    brand_id: Optional[int] = None
+    notes: Optional[str] = None
+    current_km: Optional[int] = Field(default=None, ge=0)  # optional km at time of service
+
+
+class CompleteWithBrandResponse(BaseModel):
+    success: bool
+    message: str
+    booking_id: int
+    maintenance_updated: bool
+    updated_part_name: Optional[str] = None
+
+
+# Resolve forward reference
+MaintenancePartResponse.model_rebuild()
+class CompleteWithBrandRequest(BaseModel):
+    brand_id: Optional[int] = None
+    notes: Optional[str] = None
+    current_km: Optional[int] = None
+
+class CompleteWithBrandResponse(BaseModel):
+    success: bool
+    message: str
+    booking_id: int
+    maintenance_updated: bool
+    updated_part_name: Optional[str] = None
