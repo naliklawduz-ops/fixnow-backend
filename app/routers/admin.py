@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel, Field
@@ -7,12 +7,14 @@ from datetime import datetime, timezone
 
 from ..database import get_db
 from .. import models
+from ..models import Car, User, CarMaintenance, MaintenancePart, MaintenanceBrand
 from ..auth_utils import (
     hash_password,
     verify_password,
     create_admin_token,
     get_current_admin,
 )
+from ..schemas import CarKmUpdate
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -466,3 +468,189 @@ def seed_default_admin(db: Session) -> None:
     db.add(admin)
     db.commit()
     print("✅ Seeded default admin: fixnow_admin")
+# ============================================================
+# ADMIN — CARS MANAGEMENT
+# ============================================================
+
+@router.get("/cars")
+def admin_list_cars(
+    current_admin=Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    cars = db.query(Car).order_by(Car.id.desc()).all()
+    result = []
+    for car in cars:
+        owner = db.query(User).filter(User.id == car.user_id).first()
+        result.append({
+            "id": car.id,
+            "owner_id": car.user_id,
+            "owner_name": owner.name if owner else "Unknown",
+            "owner_phone": owner.phone if owner else "",
+            "owner_email": owner.email if owner else "",
+            "brand": car.brand,
+            "model": car.model,
+            "year": car.year,
+            "color": car.color,
+            "plate": car.plate,
+            "current_km": car.current_km,
+            "estimated_km_per_month": car.estimated_km_per_month,
+            "created_at": car.created_at.isoformat() if car.created_at else None,
+        })
+    return result
+
+
+@router.put("/cars/{car_id}/km")
+def admin_update_car_km(
+    car_id: int,
+    payload: CarKmUpdate,
+    current_admin=Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    car = db.query(Car).filter(Car.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+    car.current_km = payload.current_km
+    if payload.estimated_km_per_month is not None:
+        car.estimated_km_per_month = payload.estimated_km_per_month
+    db.commit()
+    db.refresh(car)
+    return {
+        "success": True,
+        "message": "Car km updated",
+        "car_id": car.id,
+        "current_km": car.current_km,
+        "estimated_km_per_month": car.estimated_km_per_month,
+    }
+
+
+@router.get("/cars/{car_id}/maintenance")
+def admin_get_car_maintenance(
+    car_id: int,
+    current_admin=Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    car = db.query(Car).filter(Car.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+
+    owner = db.query(User).filter(User.id == car.user_id).first()
+    records = (
+        db.query(CarMaintenance)
+        .filter(CarMaintenance.car_id == car_id)
+        .order_by(CarMaintenance.part_id.asc())
+        .all()
+    )
+
+    record_list = []
+    for record in records:
+        part = db.query(MaintenancePart).filter(MaintenancePart.id == record.part_id).first()
+        brand = None
+        if record.last_changed_brand_id:
+            brand = db.query(MaintenanceBrand).filter(
+                MaintenanceBrand.id == record.last_changed_brand_id
+            ).first()
+        record_list.append({
+            "id": record.id,
+            "car_id": record.car_id,
+            "part_id": record.part_id,
+            "part_name": part.name if part else "Unknown",
+            "last_changed_km": record.last_changed_km,
+            "last_changed_brand_id": record.last_changed_brand_id,
+            "last_changed_brand_name": brand.brand_name if brand else None,
+            "last_changed_at": record.last_changed_at.isoformat() if record.last_changed_at else None,
+            "next_change_km": record.next_change_km,
+            "source": record.source,
+            "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+        })
+
+    return {
+        "car": {
+            "id": car.id,
+            "brand": car.brand,
+            "model": car.model,
+            "year": car.year,
+            "color": car.color,
+            "plate": car.plate,
+            "current_km": car.current_km,
+            "owner_name": owner.name if owner else "Unknown",
+            "owner_phone": owner.phone if owner else "",
+        },
+        "records": record_list,
+    }
+
+
+@router.put("/maintenance-records/{record_id}")
+def admin_update_maintenance_record(
+    record_id: int,
+    payload: dict = Body(...),
+    current_admin=Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    record = db.query(CarMaintenance).filter(CarMaintenance.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Maintenance record not found")
+
+    if "last_changed_km" in payload and payload["last_changed_km"] is not None:
+        try:
+            value = int(payload["last_changed_km"])
+            if value < 0:
+                raise ValueError
+            record.last_changed_km = value
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="last_changed_km must be a non-negative integer")
+
+    if "next_change_km" in payload and payload["next_change_km"] is not None:
+        try:
+            value = int(payload["next_change_km"])
+            if value < 0:
+                raise ValueError
+            record.next_change_km = value
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="next_change_km must be a non-negative integer")
+
+    if "brand_id" in payload:
+        brand_id = payload["brand_id"]
+        if brand_id is None:
+            record.last_changed_brand_id = None
+        else:
+            try:
+                brand_id = int(brand_id)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="brand_id must be an integer or null")
+            brand = db.query(MaintenanceBrand).filter(MaintenanceBrand.id == brand_id).first()
+            if not brand:
+                raise HTTPException(status_code=400, detail="Brand not found")
+            if brand.part_id != record.part_id:
+                raise HTTPException(status_code=400, detail="Brand does not belong to this part")
+            record.last_changed_brand_id = brand_id
+
+    record.source = "admin"
+    db.commit()
+    db.refresh(record)
+
+    return {
+        "success": True,
+        "message": "Maintenance record updated",
+        "record_id": record.id,
+        "last_changed_km": record.last_changed_km,
+        "next_change_km": record.next_change_km,
+        "last_changed_brand_id": record.last_changed_brand_id,
+    }
+
+
+@router.delete("/maintenance-records/{record_id}")
+def admin_delete_maintenance_record(
+    record_id: int,
+    current_admin=Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    record = db.query(CarMaintenance).filter(CarMaintenance.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Maintenance record not found")
+    db.delete(record)
+    db.commit()
+    return {
+        "success": True,
+        "message": "Maintenance record deleted",
+        "record_id": record_id,
+    }
