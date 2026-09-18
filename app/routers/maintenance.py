@@ -34,13 +34,6 @@ router = APIRouter(tags=["maintenance"])
 # ============================================================
 
 def _calculate_status(km_remaining: Optional[int]) -> str:
-    """
-    Determine color status based on km remaining until next change.
-    - unknown: no current_km or no next_change_km
-    - red: overdue (km_remaining <= 0)
-    - yellow: within 1000 km
-    - green: more than 1000 km
-    """
     if km_remaining is None:
         return "unknown"
     if km_remaining <= 0:
@@ -53,7 +46,6 @@ def _calculate_status(km_remaining: Optional[int]) -> str:
 def _estimate_months_remaining(
     km_remaining: Optional[int], km_per_month: Optional[int]
 ) -> Optional[float]:
-    """Estimate months until next change based on driving habits."""
     if km_remaining is None or not km_per_month or km_per_month <= 0:
         return None
     if km_remaining <= 0:
@@ -67,8 +59,6 @@ def _build_item_status(
     record: Optional[CarMaintenance],
     db: Session,
 ) -> MaintenanceItemStatus:
-    """Build a single maintenance item status from part + car + record."""
-    # Get all active brands for this part
     brands = (
         db.query(MaintenanceBrand)
         .filter(
@@ -80,7 +70,6 @@ def _build_item_status(
     )
     brand_responses = [MaintenanceBrandResponse.model_validate(b) for b in brands]
 
-    # If no record exists, part is unknown (customer hasn't set anything)
     if not record or record.last_changed_km is None:
         return MaintenanceItemStatus(
             part_id=part.id,
@@ -99,7 +88,6 @@ def _build_item_status(
             available_brands=brand_responses,
         )
 
-    # Calculate km remaining
     current_km = car.current_km
     next_change_km = record.next_change_km
 
@@ -109,7 +97,6 @@ def _build_item_status(
 
     item_status = _calculate_status(km_remaining)
 
-    # Get brand name if brand_id is set
     brand_name = None
     if record.last_changed_brand_id:
         brand = (
@@ -143,7 +130,6 @@ def _build_item_status(
 
 
 def _get_car_or_404(car_id: int, user_id: int, db: Session) -> Car:
-    """Fetch car and verify it belongs to the user."""
     car = db.query(Car).filter(Car.id == car_id).first()
     if not car:
         raise HTTPException(
@@ -168,7 +154,6 @@ def admin_list_parts(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """List all maintenance parts (admin only)."""
     query = db.query(MaintenancePart)
     if not include_inactive:
         query = query.filter(MaintenancePart.is_active == True)
@@ -201,8 +186,6 @@ def admin_create_part(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Create a new maintenance part (admin only)."""
-    # Validate service_id if provided
     if payload.service_id is not None:
         service = db.query(Service).filter(Service.id == payload.service_id).first()
         if not service:
@@ -236,7 +219,6 @@ def admin_update_part(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Update a maintenance part (admin only)."""
     part = db.query(MaintenancePart).filter(MaintenancePart.id == part_id).first()
     if not part:
         raise HTTPException(
@@ -249,7 +231,6 @@ def admin_update_part(
     if payload.default_interval_km is not None:
         part.default_interval_km = payload.default_interval_km
     if payload.service_id is not None:
-        # Allow setting to None explicitly via a special flag or just skip for now
         if payload.service_id > 0:
             service = db.query(Service).filter(Service.id == payload.service_id).first()
             if not service:
@@ -284,7 +265,6 @@ def admin_soft_delete_part(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Soft-delete a maintenance part (admin only)."""
     part = db.query(MaintenancePart).filter(MaintenancePart.id == part_id).first()
     if not part:
         raise HTTPException(
@@ -293,7 +273,6 @@ def admin_soft_delete_part(
         )
 
     part.is_active = False
-    # Also deactivate its brands
     db.query(MaintenanceBrand).filter(
         MaintenanceBrand.part_id == part.id
     ).update({"is_active": False})
@@ -316,7 +295,6 @@ def admin_list_brands(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """List all maintenance brands, optionally filtered by part (admin only)."""
     query = db.query(MaintenanceBrand)
     if part_id is not None:
         query = query.filter(MaintenanceBrand.part_id == part_id)
@@ -336,7 +314,6 @@ def admin_create_brand(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Create a new maintenance brand (admin only)."""
     part = db.query(MaintenancePart).filter(MaintenancePart.id == payload.part_id).first()
     if not part:
         raise HTTPException(
@@ -366,7 +343,6 @@ def admin_update_brand(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Update a maintenance brand (admin only)."""
     brand = db.query(MaintenanceBrand).filter(MaintenanceBrand.id == brand_id).first()
     if not brand:
         raise HTTPException(
@@ -392,7 +368,6 @@ def admin_soft_delete_brand(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Soft-delete a maintenance brand (admin only)."""
     brand = db.query(MaintenanceBrand).filter(MaintenanceBrand.id == brand_id).first()
     if not brand:
         raise HTTPException(
@@ -418,10 +393,8 @@ def get_car_maintenance(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get full maintenance status for a car (customer only)."""
     car = _get_car_or_404(car_id, current_user.id, db)
 
-    # Get all active parts
     parts = (
         db.query(MaintenancePart)
         .filter(MaintenancePart.is_active == True)
@@ -429,7 +402,6 @@ def get_car_maintenance(
         .all()
     )
 
-    # Get existing maintenance records for this car
     records = (
         db.query(CarMaintenance)
         .filter(CarMaintenance.car_id == car_id)
@@ -437,17 +409,14 @@ def get_car_maintenance(
     )
     records_by_part = {r.part_id: r for r in records}
 
-    # Build item statuses
     items = []
     for part in parts:
         record = records_by_part.get(part.id)
         items.append(_build_item_status(part, car, record, db))
 
-    # Sort: red → yellow → unknown → green
     status_order = {"red": 0, "yellow": 1, "unknown": 2, "green": 3}
     items.sort(key=lambda i: (status_order.get(i.status, 99), i.part_name))
 
-    # Count statuses
     red_count = sum(1 for i in items if i.status == "red")
     yellow_count = sum(1 for i in items if i.status == "yellow")
     green_count = sum(1 for i in items if i.status == "green")
@@ -468,11 +437,10 @@ def get_car_maintenance(
 @router.put("/cars/{car_id}/km")
 def update_car_km(
     car_id: int,
-    payload: dict,  # { current_km: int, estimated_km_per_month?: int }
+    payload: dict,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update car's current km and optionally estimated km per month."""
     car = _get_car_or_404(car_id, current_user.id, db)
 
     if "current_km" in payload:
@@ -518,7 +486,6 @@ def reset_car_maintenance(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Customer manually marks a part as changed."""
     car = _get_car_or_404(car_id, current_user.id, db)
 
     part = db.query(MaintenancePart).filter(MaintenancePart.id == part_id).first()
@@ -528,7 +495,6 @@ def reset_car_maintenance(
             detail="Part not found",
         )
 
-    # Determine interval to use
     interval_km = part.default_interval_km
     if payload.brand_id is not None:
         brand = (
@@ -548,7 +514,6 @@ def reset_car_maintenance(
 
     next_change_km = payload.last_changed_km + interval_km
 
-    # Find or create record
     record = (
         db.query(CarMaintenance)
         .filter(
@@ -579,3 +544,62 @@ def reset_car_maintenance(
         "last_changed_km": record.last_changed_km,
         "next_change_km": record.next_change_km,
     }
+
+
+# ============================================================
+# PUBLIC ENDPOINTS — NO AUTH (catalog data)
+# ============================================================
+
+@router.get(
+    "/maintenance/parts",
+    response_model=List[MaintenancePartResponse],
+)
+def public_list_parts(
+    service_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(MaintenancePart).filter(MaintenancePart.is_active == True)
+    if service_id is not None:
+        query = query.filter(MaintenancePart.service_id == service_id)
+
+    parts = query.order_by(MaintenancePart.id.asc()).all()
+
+    result = []
+    for part in parts:
+        brands = (
+            db.query(MaintenanceBrand)
+            .filter(
+                MaintenanceBrand.part_id == part.id,
+                MaintenanceBrand.is_active == True,
+            )
+            .order_by(MaintenanceBrand.interval_km.asc())
+            .all()
+        )
+        part_response = MaintenancePartResponse.model_validate(part)
+        part_response.brands = [
+            MaintenanceBrandResponse.model_validate(b) for b in brands
+        ]
+        result.append(part_response)
+    return result
+
+
+@router.get(
+    "/maintenance/brands",
+    response_model=List[MaintenanceBrandResponse],
+)
+def public_list_brands(
+    part_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(MaintenanceBrand).filter(MaintenanceBrand.is_active == True)
+    if part_id is not None:
+        query = query.filter(MaintenanceBrand.part_id == part_id)
+
+    brands = (
+        query.order_by(
+            MaintenanceBrand.part_id.asc(),
+            MaintenanceBrand.interval_km.asc(),
+        )
+        .all()
+    )
+    return [MaintenanceBrandResponse.model_validate(b) for b in brands]
