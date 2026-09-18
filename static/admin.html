@@ -88,6 +88,13 @@
   .toast { position: fixed; bottom: 24px; right: 24px; background: var(--panel-2); border: 1px solid var(--gold); color: var(--text); padding: 12px 20px; border-radius: 8px; font-size: 13px; opacity: 0; transform: translateY(10px); transition: all 0.25s; pointer-events: none; z-index: 200; }
   .toast.show { opacity: 1; transform: translateY(0); }
   .toast.error { border-color: var(--danger); }
+
+  /* Cars & Maintenance styles */
+  .maint-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 150; }
+  .maint-modal.open { display: flex; }
+  .maint-modal-content { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 28px; width: 100%; max-width: 750px; max-height: 90vh; overflow-y: auto; }
+  .maint-modal-content h2 { font-size: 22px; color: var(--gold); margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .maint-close { background: none; border: none; color: var(--gold); font-size: 22px; cursor: pointer; width: auto; padding: 0; }
 </style>
 </head>
 <body>
@@ -123,12 +130,21 @@
     <button data-tab="mechanics" onclick="switchTab('mechanics')">Mechanics</button>
     <button data-tab="services" onclick="switchTab('services')">Services</button>
     <button data-tab="customers" onclick="switchTab('customers')">Customers</button>
+    <button data-tab="cars" onclick="switchTab('cars')">Cars & Maintenance</button>
   </nav>
   <main id="tab-content"></main>
 </div>
 
 <div class="modal-backdrop" id="modal-backdrop">
   <div class="modal" id="modal-content"></div>
+</div>
+
+<!-- Maintenance Records Modal -->
+<div class="maint-modal" id="maint-modal">
+  <div class="maint-modal-content">
+    <h2 id="maint-modal-title">Maintenance Records <button class="maint-close" onclick="closeMaintModal()">✕</button></h2>
+    <div id="maint-modal-body"><div class="loading">Loading...</div></div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -226,6 +242,7 @@ function switchTab(tab) {
   else if (tab === "mechanics") loadMechanics();
   else if (tab === "services") loadServices();
   else if (tab === "customers") loadCustomers();
+  else if (tab === "cars") loadCars();
 }
 
 async function loadDashboard() {
@@ -251,6 +268,7 @@ async function loadDashboard() {
           <button class="btn btn-ghost btn-sm" onclick="switchTab('bookings')">View Bookings</button>
           <button class="btn btn-ghost btn-sm" onclick="switchTab('mechanics')">Manage Mechanics</button>
           <button class="btn btn-ghost btn-sm" onclick="switchTab('services')">Manage Services</button>
+          <button class="btn btn-ghost btn-sm" onclick="switchTab('cars')">Cars & Maintenance</button>
         </div>
       </div>`;
   } catch (e) { document.getElementById("tab-content").innerHTML = '<div class="empty">' + escapeHtml(e.message) + '</div>'; toast(e.message, true); }
@@ -421,9 +439,165 @@ async function loadCustomers() {
   } catch (e) { document.getElementById("tab-content").innerHTML = '<div class="empty">' + escapeHtml(e.message) + '</div>'; toast(e.message, true); }
 }
 
+// ============================================================
+// CARS & MAINTENANCE
+// ============================================================
+
+async function loadCars() {
+  try {
+    const cars = await api("/admin/cars");
+    if (!cars.length) {
+      document.getElementById("tab-content").innerHTML = '<div class="card"><h2>Cars & Maintenance</h2><div class="empty">No cars registered yet.</div></div>';
+      return;
+    }
+    const rows = cars.map(c => `<tr>
+      <td>#${c.id}</td>
+      <td>${escapeHtml(c.owner_name)}<br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(c.owner_phone)}</span></td>
+      <td>${escapeHtml(c.brand)} ${escapeHtml(c.model)} (${c.year})</td>
+      <td>${escapeHtml(c.plate)}</td>
+      <td>${c.current_km !== null ? c.current_km + ' km' : '<span style="color:var(--gold);">NOT SET</span>'}</td>
+      <td><div class="row-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openEditKmModal(${c.id}, '${escapeHtml(c.owner_name)} — ${escapeHtml(c.brand)} ${escapeHtml(c.model)} (${escapeHtml(c.plate)})', ${c.current_km ?? 'null'}, ${c.estimated_km_per_month ?? 'null'})">✏️ Edit KM</button>
+        <button class="btn btn-ghost btn-sm" onclick="viewMaintenance(${c.id})">🔧 Maintenance</button>
+      </div></td>
+    </tr>`).join("");
+    document.getElementById("tab-content").innerHTML = `
+      <div class="card">
+        <h2>Cars & Maintenance <button class="btn btn-ghost btn-sm" onclick="loadCars()">🔄 Refresh</button></h2>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead><tr><th>ID</th><th>Owner</th><th>Car</th><th>Plate</th><th>Current KM</th><th>Actions</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch (e) {
+    document.getElementById("tab-content").innerHTML = '<div class="empty">' + escapeHtml(e.message) + '</div>';
+    toast(e.message, true);
+  }
+}
+
+function openEditKmModal(carId, carLabel, currentKm, estimatedKm) {
+  document.getElementById("modal-content").innerHTML = `
+    <h2>Correct Car KM</h2>
+    <div class="field"><label>Car</label><input type="text" value="${escapeHtml(carLabel)}" disabled /></div>
+    <div class="field"><label>Current KM</label><input id="edit-km-value" type="number" min="0" value="${currentKm ?? ''}" /></div>
+    <div class="field"><label>Estimated KM / Month (optional)</label><input id="edit-km-estimate" type="number" min="0" value="${estimatedKm ?? ''}" /></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveEditKm(${carId})">Save</button>
+    </div>`;
+  document.getElementById("modal-backdrop").classList.add("open");
+}
+
+async function saveEditKm(carId) {
+  const km = parseInt(document.getElementById("edit-km-value").value, 10);
+  const est = document.getElementById("edit-km-estimate").value;
+  if (isNaN(km) || km < 0) { toast("Enter a valid km value", true); return; }
+  const body = { current_km: km };
+  if (est !== "" && !isNaN(parseInt(est, 10))) body.estimated_km_per_month = parseInt(est, 10);
+  try {
+    await api("/admin/cars/" + carId + "/km", { method: "PUT", body: JSON.stringify(body) });
+    toast("KM updated");
+    closeModal();
+    loadCars();
+  } catch (e) { toast(e.message, true); }
+}
+
+let _maintCarId = null;
+
+async function viewMaintenance(carId) {
+  _maintCarId = carId;
+  const modal = document.getElementById("maint-modal");
+  const body = document.getElementById("maint-modal-body");
+  const title = document.getElementById("maint-modal-title");
+  body.innerHTML = '<div class="loading">Loading...</div>';
+  modal.classList.add("open");
+
+  try {
+    const data = await api("/admin/cars/" + carId + "/maintenance");
+    title.innerHTML = `${escapeHtml(data.car.owner_name)} — ${escapeHtml(data.car.brand)} ${escapeHtml(data.car.model)} <button class="maint-close" onclick="closeMaintModal()">✕</button>`;
+
+    if (!data.records.length) {
+      body.innerHTML = '<div class="empty">No maintenance records for this car.</div>';
+      return;
+    }
+
+    const rows = data.records.map(r => `<tr>
+      <td>${escapeHtml(r.part_name)}</td>
+      <td>${r.last_changed_km ?? '—'} km</td>
+      <td>${r.next_change_km ?? '—'} km</td>
+      <td>${r.last_changed_brand_name ? escapeHtml(r.last_changed_brand_name) : '—'}</td>
+      <td><span style="font-size:11px;color:var(--text-dim);">${escapeHtml(r.source || '')}</span></td>
+      <td><div class="row-actions">
+        <button class="btn btn-ghost btn-sm" onclick='openEditRecordModal(${JSON.stringify(r).replace(/'/g, "&apos;")})'>✏️ Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteRecord(${r.id})">🗑️ Delete</button>
+      </div></td>
+    </tr>`).join("");
+
+    body.innerHTML = `<div style="overflow-x:auto;"><table>
+      <thead><tr><th>Part</th><th>Last KM</th><th>Next KM</th><th>Brand</th><th>Source</th><th>Actions</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  } catch (e) {
+    body.innerHTML = '<div class="empty" style="color:var(--danger);">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function closeMaintModal() {
+  document.getElementById("maint-modal").classList.remove("open");
+  _maintCarId = null;
+}
+
+async function openEditRecordModal(record) {
+  // Load brands for this part
+  let brandsHtml = '<option value="">— No brand —</option>';
+  try {
+    const brands = await api("/maintenance/brands?part_id=" + record.part_id);
+    brandsHtml += brands.map(b => `<option value="${b.id}" ${b.id === record.last_changed_brand_id ? 'selected' : ''}>${escapeHtml(b.brand_name)} (${b.interval_km} km)</option>`).join("");
+  } catch (e) { /* ignore */ }
+
+  document.getElementById("modal-content").innerHTML = `
+    <h2>Correct — ${escapeHtml(record.part_name)}</h2>
+    <div class="field"><label>Last Changed KM</label><input id="er-last-km" type="number" min="0" value="${record.last_changed_km ?? ''}" /></div>
+    <div class="field"><label>Next Change KM</label><input id="er-next-km" type="number" min="0" value="${record.next_change_km ?? ''}" /></div>
+    <div class="field"><label>Brand Used</label><select id="er-brand">${brandsHtml}</select></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveEditRecord(${record.id})">Save</button>
+    </div>`;
+  document.getElementById("modal-backdrop").classList.add("open");
+}
+
+async function saveEditRecord(recordId) {
+  const lastKm = document.getElementById("er-last-km").value;
+  const nextKm = document.getElementById("er-next-km").value;
+  const brandId = document.getElementById("er-brand").value;
+  const body = {};
+  if (lastKm !== "" && !isNaN(parseInt(lastKm, 10))) body.last_changed_km = parseInt(lastKm, 10);
+  if (nextKm !== "" && !isNaN(parseInt(nextKm, 10))) body.next_change_km = parseInt(nextKm, 10);
+  body.brand_id = brandId === "" ? null : parseInt(brandId, 10);
+
+  try {
+    await api("/admin/maintenance-records/" + recordId, { method: "PUT", body: JSON.stringify(body) });
+    toast("Record updated");
+    closeModal();
+    if (_maintCarId) viewMaintenance(_maintCarId);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteRecord(recordId) {
+  if (!confirm("Delete this maintenance record? This cannot be undone.")) return;
+  try {
+    await api("/admin/maintenance-records/" + recordId, { method: "DELETE" });
+    toast("Record deleted");
+    if (_maintCarId) viewMaintenance(_maintCarId);
+  } catch (e) { toast(e.message, true); }
+}
+
 function closeModal() { document.getElementById("modal-backdrop").classList.remove("open"); document.getElementById("modal-content").innerHTML = ""; }
 document.getElementById("modal-backdrop").addEventListener("click", (e) => { if (e.target.id === "modal-backdrop") closeModal(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeMaintModal(); } });
 document.getElementById("login-password").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
 document.getElementById("login-username").addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("login-password").focus(); });
 
