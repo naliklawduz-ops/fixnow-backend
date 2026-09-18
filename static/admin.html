@@ -550,6 +550,7 @@ function closeMaintModal() {
 }
 
 async function openEditRecordModal(record) {
+  closeMaintModal();
   // Load brands for this part
   let brandsHtml = '<option value="">— No brand —</option>';
   try {
