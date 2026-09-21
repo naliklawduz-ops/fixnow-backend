@@ -13,6 +13,7 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     password = Column(String, nullable=False)
     address = Column(String, nullable=True)
+    fcm_token = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     cars = relationship("Car", back_populates="owner", cascade="all, delete-orphan")
@@ -62,6 +63,7 @@ class Mechanic(Base):
     is_available = Column(Boolean, default=True)
     access_code = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
+    fcm_token = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     bookings = relationship("Booking", back_populates="mechanic")

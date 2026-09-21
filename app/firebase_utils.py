@@ -1,0 +1,97 @@
+import os
+import json
+import firebase_admin
+from firebase_admin import credentials, messaging
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ── Initialize Firebase Admin SDK ──────────────────────────────
+_firebase_initialized = False
+
+def _init_firebase():
+    global _firebase_initialized
+    if _firebase_initialized:
+        return
+    try:
+        cred_path = os.getenv("FIREBASE_CREDENTIALS", "firebase-service-account.json")
+        # Support absolute or relative path
+        if not os.path.isabs(cred_path):
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            cred_path = os.path.join(base_dir, cred_path)
+        cred = credentials.Certificate(cred_path)
+        firebase_admin.initialize_app(cred)
+        _firebase_initialized = True
+        print("✅ Firebase Admin SDK initialized")
+    except Exception as e:
+        print(f"⚠️ Firebase init failed: {e}")
+
+
+# ── Send notification to a single device ───────────────────────
+def send_notification(
+    token: str,
+    title: str,
+    body: str,
+    data: dict = None,
+) -> bool:
+    """
+    Send a push notification to a single device FCM token.
+    Returns True if sent successfully, False otherwise.
+    """
+    _init_firebase()
+    if not _firebase_initialized:
+        return False
+
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            data={k: str(v) for k, v in (data or {}).items()},
+            token=token,
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    sound="default",
+                    channel_id="fixnow_notifications",
+                ),
+            ),
+        )
+        messaging.send(message)
+        return True
+    except Exception as e:
+        print(f"⚠️ FCM send failed: {e}")
+        return False
+
+
+# ── Send notification to multiple devices ──────────────────────
+def send_multicast_notification(
+    tokens: list,
+    title: str,
+    body: str,
+    data: dict = None,
+) -> int:
+    """
+    Send a push notification to multiple FCM tokens.
+    Returns number of successful sends.
+    """
+    _init_firebase()
+    if not _firebase_initialized or not tokens:
+        return 0
+
+    try:
+        message = messaging.MulticastMessage(
+            notification=messaging.Notification(title=title, body=body),
+            data={k: str(v) for k, v in (data or {}).items()},
+            tokens=tokens,
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    sound="default",
+                    channel_id="fixnow_notifications",
+                ),
+            ),
+        )
+        response = messaging.send_each_for_multicast(message)
+        return response.success_count
+    except Exception as e:
+        print(f"⚠️ FCM multicast failed: {e}")
+        return 0

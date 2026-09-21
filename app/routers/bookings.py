@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from ..database import get_db
 from .. import models, schemas
 from ..auth_utils import get_current_user_id, get_current_mechanic
+from ..firebase_utils import send_notification
 
 router = APIRouter(
     prefix="/bookings",
@@ -84,6 +85,22 @@ def create_booking(
     db.commit()
     db.refresh(new_booking)
 
+    # Notify all available mechanics about new booking
+    mechanics = db.query(models.Mechanic).filter(
+        models.Mechanic.is_active == True,
+        models.Mechanic.is_available == True,
+        models.Mechanic.fcm_token != None,
+    ).all()
+
+    for mechanic in mechanics:
+        if mechanic.fcm_token:
+            send_notification(
+                token=mechanic.fcm_token,
+                title="🔧 New Booking Request",
+                body=f"{service.name} — {booking_data.address}",
+                data={"booking_id": str(new_booking.id), "type": "new_booking"},
+            )
+
     return _build_booking_response(new_booking, db)
 
 
@@ -145,6 +162,22 @@ def cancel_booking(
     booking.status = "cancelled"
     db.commit()
     db.refresh(booking)
+
+    # Notify assigned mechanic if any
+    if booking.assigned_mechanic_id:
+        mechanic = db.query(models.Mechanic).filter(
+            models.Mechanic.id == booking.assigned_mechanic_id
+        ).first()
+        if mechanic and mechanic.fcm_token:
+            service = db.query(models.Service).filter(
+                models.Service.id == booking.service_id
+            ).first()
+            send_notification(
+                token=mechanic.fcm_token,
+                title="❌ Booking Cancelled",
+                body=f"Booking #{booking.id} — {service.name if service else ''} has been cancelled",
+                data={"booking_id": str(booking.id), "type": "booking_cancelled"},
+            )
 
     return {"success": True, "message": "Booking cancelled successfully"}
 
@@ -261,6 +294,17 @@ def complete_booking_with_brand(
                 updated_part_name = part_for_brand.name
 
     db.commit()
+
+    # 10. Notify customer that booking is completed
+    customer = db.query(models.User).filter(models.User.id == booking.user_id).first()
+    if customer and customer.fcm_token:
+        service = db.query(models.Service).filter(models.Service.id == booking.service_id).first()
+        send_notification(
+            token=customer.fcm_token,
+            title="✅ Service Completed",
+            body=f"Your {service.name if service else 'service'} has been completed by {current_mechanic.name}",
+            data={"booking_id": str(booking.id), "type": "booking_completed"},
+        )
 
     message = "Booking completed"
     if maintenance_updated:

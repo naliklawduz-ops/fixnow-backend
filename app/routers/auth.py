@@ -44,6 +44,10 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=6, max_length=100)
 
 
+class FCMTokenRequest(BaseModel):
+    fcm_token: str
+
+
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
@@ -305,3 +309,18 @@ def update_profile(
 
     db.commit()
     return {"success": True, "message": "Profile updated successfully"}
+
+
+@router.post("/fcm-token")
+def update_fcm_token(
+    request: FCMTokenRequest,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    """Customer registers their FCM device token for push notifications."""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.fcm_token = request.fcm_token
+    db.commit()
+    return {"success": True, "message": "FCM token updated"}

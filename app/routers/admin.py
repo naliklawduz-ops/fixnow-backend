@@ -15,6 +15,7 @@ from ..auth_utils import (
     get_current_admin,
 )
 from ..schemas import CarKmUpdate
+from ..firebase_utils import send_notification
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -271,7 +272,27 @@ def assign_mechanic(
     booking.assigned_mechanic_id = mechanic.id
     db.commit()
     db.refresh(booking)
+
+    # ── Notify mechanic about new assignment ──
+    if mechanic.fcm_token:
+        service = db.query(models.Service).filter(models.Service.id == booking.service_id).first()
+        send_notification(
+            token=mechanic.fcm_token,
+            title="🔧 New Job Assigned",
+            body=f"You have been assigned: {service.name if service else 'a service'} at {booking.address}",
+            data={"booking_id": str(booking.id), "type": "assigned"},
+        )
+
+    # ── Notify customer that mechanic is assigned ──
     customer = booking.customer
+    if customer and customer.fcm_token:
+        send_notification(
+            token=customer.fcm_token,
+            title="✅ Mechanic Assigned",
+            body=f"{mechanic.name} will handle your booking on {booking.date} at {booking.time}",
+            data={"booking_id": str(booking.id), "type": "mechanic_assigned"},
+        )
+
     service = booking.service
     return BookingOut(
         id=booking.id,
@@ -435,7 +456,6 @@ def create_service(
     db.add(service)
     db.commit()
     db.refresh(service)
-    # Auto-link maintenance parts by keyword
     auto_link_parts(service, db)
     return service
 
@@ -460,7 +480,6 @@ def update_service(
         service.price = payload.price
     db.commit()
     db.refresh(service)
-    # Auto-link maintenance parts by keyword
     auto_link_parts(service, db)
     return service
 
@@ -497,7 +516,6 @@ def get_user_bookings(
     current_admin: models.Admin = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Get all bookings for a specific customer with full details."""
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -555,10 +573,7 @@ def seed_default_admin(db: Session) -> None:
     print("✅ Seeded default admin: fixnow_admin")
 
 
-# ============================================================
-# ADMIN — CARS MANAGEMENT
-# ============================================================
-
+# ─── Cars & Maintenance ───────────────────────────────────────
 @router.get("/cars")
 def admin_list_cars(
     current_admin=Depends(get_current_admin),

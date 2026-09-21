@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
+from pydantic import BaseModel
 
 from ..database import get_db
 from ..models import Mechanic, Booking, User, Service, Car
@@ -14,6 +15,10 @@ from ..auth_utils import (
 )
 
 router = APIRouter(prefix="/mechanic", tags=["mechanic"])
+
+
+class FCMTokenRequest(BaseModel):
+    fcm_token: str
 
 
 @router.post("/login", response_model=MechanicResponse)
@@ -54,6 +59,18 @@ def mechanic_login(login_data: MechanicLogin, db: Session = Depends(get_db)):
         is_available=mechanic.is_available,
         access_token=token,
     )
+
+
+@router.post("/fcm-token")
+def update_fcm_token(
+    request: FCMTokenRequest,
+    current_mechanic: Mechanic = Depends(get_current_mechanic),
+    db: Session = Depends(get_db),
+):
+    """Mechanic registers their FCM device token for push notifications."""
+    current_mechanic.fcm_token = request.fcm_token
+    db.commit()
+    return {"success": True, "message": "FCM token updated"}
 
 
 @router.get("/bookings", response_model=List[MechanicBookingResponse])
