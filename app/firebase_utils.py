@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Initialize Firebase Admin SDK ──────────────────────────────
 _firebase_initialized = False
 
 def _init_firebase():
@@ -14,12 +13,19 @@ def _init_firebase():
     if _firebase_initialized:
         return
     try:
-        cred_path = os.getenv("FIREBASE_CREDENTIALS", "firebase-service-account.json")
-        # Support absolute or relative path
-        if not os.path.isabs(cred_path):
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            cred_path = os.path.join(base_dir, cred_path)
-        cred = credentials.Certificate(cred_path)
+        # First try JSON from environment variable (Railway)
+        cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
+        if cred_json:
+            cred_dict = json.loads(cred_json)
+            cred = credentials.Certificate(cred_dict)
+        else:
+            # Fall back to file path (local)
+            cred_path = os.getenv("FIREBASE_CREDENTIALS", "firebase-service-account.json")
+            if not os.path.isabs(cred_path):
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                cred_path = os.path.join(base_dir, cred_path)
+            cred = credentials.Certificate(cred_path)
+
         firebase_admin.initialize_app(cred)
         _firebase_initialized = True
         print("✅ Firebase Admin SDK initialized")
@@ -27,21 +33,10 @@ def _init_firebase():
         print(f"⚠️ Firebase init failed: {e}")
 
 
-# ── Send notification to a single device ───────────────────────
-def send_notification(
-    token: str,
-    title: str,
-    body: str,
-    data: dict = None,
-) -> bool:
-    """
-    Send a push notification to a single device FCM token.
-    Returns True if sent successfully, False otherwise.
-    """
+def send_notification(token: str, title: str, body: str, data: dict = None) -> bool:
     _init_firebase()
     if not _firebase_initialized:
         return False
-
     try:
         message = messaging.Message(
             notification=messaging.Notification(title=title, body=body),
@@ -62,21 +57,10 @@ def send_notification(
         return False
 
 
-# ── Send notification to multiple devices ──────────────────────
-def send_multicast_notification(
-    tokens: list,
-    title: str,
-    body: str,
-    data: dict = None,
-) -> int:
-    """
-    Send a push notification to multiple FCM tokens.
-    Returns number of successful sends.
-    """
+def send_multicast_notification(tokens: list, title: str, body: str, data: dict = None) -> int:
     _init_firebase()
     if not _firebase_initialized or not tokens:
         return 0
-
     try:
         message = messaging.MulticastMessage(
             notification=messaging.Notification(title=title, body=body),
