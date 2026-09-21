@@ -13,8 +13,32 @@ router = APIRouter(
 )
 
 
+def _build_booking_response(booking: models.Booking, db: Session) -> schemas.BookingResponse:
+    """Build a rich BookingResponse with service name, mechanic name etc."""
+    service = db.query(models.Service).filter(models.Service.id == booking.service_id).first()
+    mechanic = db.query(models.Mechanic).filter(models.Mechanic.id == booking.assigned_mechanic_id).first() if booking.assigned_mechanic_id else None
+
+    return schemas.BookingResponse(
+        id=booking.id,
+        user_id=booking.user_id,
+        service_id=booking.service_id,
+        service_name=service.name if service else None,
+        service_category=service.category if service else None,
+        service_price=service.price if service else None,
+        car_id=booking.car_id,
+        assigned_mechanic_id=booking.assigned_mechanic_id,
+        mechanic_name=mechanic.name if mechanic else None,
+        date=booking.date,
+        time=booking.time,
+        address=booking.address,
+        status=booking.status,
+        notes=booking.notes,
+        created_at=booking.created_at,
+    )
+
+
 # ============================================================
-# CUSTOMER ENDPOINTS (unchanged)
+# CUSTOMER ENDPOINTS
 # ============================================================
 
 @router.post("/", response_model=schemas.BookingResponse, status_code=status.HTTP_201_CREATED)
@@ -60,7 +84,7 @@ def create_booking(
     db.commit()
     db.refresh(new_booking)
 
-    return new_booking
+    return _build_booking_response(new_booking, db)
 
 
 @router.get("/", response_model=List[schemas.BookingResponse])
@@ -72,7 +96,7 @@ def get_bookings(
         models.Booking.user_id == user_id
     ).order_by(models.Booking.created_at.desc()).all()
 
-    return bookings
+    return [_build_booking_response(b, db) for b in bookings]
 
 
 @router.get("/{booking_id}", response_model=schemas.BookingResponse)
@@ -92,7 +116,7 @@ def get_booking(
             detail="Booking not found"
         )
 
-    return booking
+    return _build_booking_response(booking, db)
 
 
 @router.put("/{booking_id}/cancel")
@@ -126,7 +150,7 @@ def cancel_booking(
 
 
 # ============================================================
-# NEW: MECHANIC COMPLETE WITH BRAND
+# MECHANIC: COMPLETE WITH BRAND
 # ============================================================
 
 @router.post("/{booking_id}/complete-with-brand", response_model=schemas.CompleteWithBrandResponse)
@@ -180,7 +204,6 @@ def complete_booking_with_brand(
         if not selected_brand:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Brand not found or inactive")
 
-        # Verify brand belongs to a part linked to this service
         part_check = db.query(models.MaintenancePart).filter(
             models.MaintenancePart.id == selected_brand.part_id,
             models.MaintenancePart.service_id == booking.service_id,

@@ -115,8 +115,12 @@ class BookingResponse(BaseModel):
     id: int
     user_id: int
     service_id: int
+    service_name: Optional[str] = None
+    service_category: Optional[str] = None
+    service_price: Optional[int] = None
     car_id: Optional[int] = None
     assigned_mechanic_id: Optional[int] = None
+    mechanic_name: Optional[str] = None
     date: str
     time: str
     address: str
@@ -146,6 +150,7 @@ class MechanicResponse(BaseModel):
 
 class MechanicBookingResponse(BaseModel):
     id: int
+    service_id: int
     customer_name: str
     customer_phone: str
     customer_address: str
@@ -157,6 +162,7 @@ class MechanicBookingResponse(BaseModel):
     car_year: Optional[int] = None
     car_color: str
     car_plate: str
+    car_current_km: Optional[int] = None
     date: str
     time: str
     address: str
@@ -240,7 +246,6 @@ class MaintenanceBrandResponse(BaseModel):
 
 # ----- Customer: Car Maintenance Status -----
 class MaintenanceItemStatus(BaseModel):
-    """Status of a single maintenance part for a specific car."""
     part_id: int
     part_name: str
     last_changed_km: Optional[int] = None
@@ -249,7 +254,7 @@ class MaintenanceItemStatus(BaseModel):
     last_changed_brand_name: Optional[str] = None
     next_change_km: Optional[int] = None
     km_remaining: Optional[int] = None
-    status: str  # "green" | "yellow" | "red" | "unknown"
+    status: str
     source: Optional[str] = None
     service_id: Optional[int] = None
     service_category: Optional[str] = None
@@ -258,9 +263,8 @@ class MaintenanceItemStatus(BaseModel):
 
 
 class CarMaintenanceSummary(BaseModel):
-    """Full maintenance status for a car."""
     car_id: int
-    car_name: str  # e.g. "Toyota Corolla 2018"
+    car_name: str
     current_km: Optional[int] = None
     estimated_km_per_month: Optional[int] = 1000
     total_parts: int
@@ -272,17 +276,15 @@ class CarMaintenanceSummary(BaseModel):
 
 # ----- Manual Reset by Customer -----
 class CarMaintenanceResetRequest(BaseModel):
-    """Customer manually marks a part as changed."""
     last_changed_km: int = Field(ge=0)
     brand_id: Optional[int] = None
 
 
 # ----- Mechanic: Complete with Brand -----
 class CompleteWithBrandRequest(BaseModel):
-    """Mechanic completes a booking and optionally records the brand used."""
     brand_id: Optional[int] = None
     notes: Optional[str] = None
-    current_km: Optional[int] = Field(default=None, ge=0)  # optional km at time of service
+    current_km: Optional[int] = Field(default=None, ge=0)
 
 
 class CompleteWithBrandResponse(BaseModel):
@@ -295,14 +297,3 @@ class CompleteWithBrandResponse(BaseModel):
 
 # Resolve forward reference
 MaintenancePartResponse.model_rebuild()
-class CompleteWithBrandRequest(BaseModel):
-    brand_id: Optional[int] = None
-    notes: Optional[str] = None
-    current_km: Optional[int] = None
-
-class CompleteWithBrandResponse(BaseModel):
-    success: bool
-    message: str
-    booking_id: int
-    maintenance_updated: bool
-    updated_part_name: Optional[str] = None

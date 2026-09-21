@@ -139,6 +139,39 @@ class StatsOut(BaseModel):
     revenue_total: int
 
 
+# ─── Auto-link helper ─────────────────────────────────────────
+KEYWORD_PART_MAP = {
+    "oil change": ["Engine Oil Change", "Oil Filter"],
+    "engine oil": ["Engine Oil Change", "Oil Filter"],
+    "oil filter": ["Oil Filter"],
+    "oil": ["Engine Oil Change", "Oil Filter"],
+    "brake": ["Brake Pads"],
+    "battery": ["Battery Check"],
+    "tire": ["Tire Rotation"],
+    "tyre": ["Tire Rotation"],
+    "wheel": ["Tire Rotation"],
+    "air filter": ["Air Filter"],
+    "ac filter": ["Air Filter"],
+}
+
+def auto_link_parts(service: models.Service, db: Session) -> None:
+    service_name_lower = (service.name or "").lower()
+    service_category_lower = (service.category or "").lower()
+    combined = f"{service_name_lower} {service_category_lower}"
+    matched_part_names = set()
+    for keyword, part_names in KEYWORD_PART_MAP.items():
+        if keyword in combined:
+            for part_name in part_names:
+                matched_part_names.add(part_name)
+    if not matched_part_names:
+        return
+    for part_name in matched_part_names:
+        part = db.query(MaintenancePart).filter(MaintenancePart.name == part_name).first()
+        if part and part.service_id != service.id:
+            part.service_id = service.id
+    db.commit()
+
+
 # ─── Auth ─────────────────────────────────────────────────────
 @router.post("/login", response_model=AdminLoginResponse)
 def admin_login(payload: AdminLoginRequest, db: Session = Depends(get_db)):
@@ -171,11 +204,9 @@ def admin_stats(
     active_mechanics = db.query(func.count(models.Mechanic.id)).filter(models.Mechanic.is_active == True).scalar() or 0
     total_services = db.query(func.count(models.Service.id)).scalar() or 0
     total_customers = db.query(func.count(models.User.id)).scalar() or 0
-
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     revenue_today = db.query(func.coalesce(func.sum(models.Service.price), 0)).join(models.Booking, models.Booking.service_id == models.Service.id).filter(models.Booking.status == "completed").filter(models.Booking.date == today_str).scalar() or 0
     revenue_total = db.query(func.coalesce(func.sum(models.Service.price), 0)).join(models.Booking, models.Booking.service_id == models.Service.id).filter(models.Booking.status == "completed").scalar() or 0
-
     return StatsOut(
         total_bookings=total_bookings,
         active_bookings=active_bookings,
@@ -404,6 +435,8 @@ def create_service(
     db.add(service)
     db.commit()
     db.refresh(service)
+    # Auto-link maintenance parts by keyword
+    auto_link_parts(service, db)
     return service
 
 
@@ -427,6 +460,8 @@ def update_service(
         service.price = payload.price
     db.commit()
     db.refresh(service)
+    # Auto-link maintenance parts by keyword
+    auto_link_parts(service, db)
     return service
 
 
@@ -456,6 +491,56 @@ def list_users(
     return db.query(models.User).order_by(models.User.id.desc()).all()
 
 
+@router.get("/users/{user_id}/bookings")
+def get_user_bookings(
+    user_id: int,
+    current_admin: models.Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Get all bookings for a specific customer with full details."""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    bookings = (
+        db.query(models.Booking)
+        .filter(models.Booking.user_id == user_id)
+        .order_by(models.Booking.created_at.desc())
+        .all()
+    )
+
+    result = []
+    for b in bookings:
+        service = b.service
+        mechanic = b.mechanic
+        car = db.query(models.Car).filter(models.Car.id == b.car_id).first() if b.car_id else None
+        result.append({
+            "id": b.id,
+            "service_name": service.name if service else "Unknown",
+            "service_category": service.category if service else "",
+            "service_price": service.price if service else 0,
+            "mechanic_name": mechanic.name if mechanic else "Not assigned",
+            "car": f"{car.brand} {car.model} ({car.plate})" if car else "No car",
+            "date": b.date,
+            "time": b.time,
+            "address": b.address,
+            "status": b.status,
+            "notes": b.notes or "",
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+        })
+
+    return {
+        "customer": {
+            "id": user.id,
+            "name": user.name,
+            "phone": user.phone,
+            "email": user.email,
+        },
+        "bookings": result,
+        "total": len(result),
+    }
+
+
 # ─── Seed default admin ───────────────────────────────────────
 def seed_default_admin(db: Session) -> None:
     existing = db.query(models.Admin).first()
@@ -468,6 +553,8 @@ def seed_default_admin(db: Session) -> None:
     db.add(admin)
     db.commit()
     print("✅ Seeded default admin: fixnow_admin")
+
+
 # ============================================================
 # ADMIN — CARS MANAGEMENT
 # ============================================================
