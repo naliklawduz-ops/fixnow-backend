@@ -63,6 +63,7 @@ def get_mechanic_bookings(
 ):
     bookings = (
         db.query(Booking)
+        .filter(Booking.assigned_mechanic_id == current_mechanic.id)
         .filter(Booking.status == "active")
         .order_by(Booking.created_at.desc())
         .all()
@@ -77,6 +78,7 @@ def get_mechanic_bookings(
         result.append(
             MechanicBookingResponse(
                 id=booking.id,
+                service_id=booking.service_id,
                 customer_name=customer.name if customer else "Unknown",
                 customer_phone=customer.phone if customer else "Unknown",
                 customer_address=customer.address if (customer and customer.address) else "",
@@ -88,6 +90,7 @@ def get_mechanic_bookings(
                 car_year=car.year if car else None,
                 car_color=car.color if car else "",
                 car_plate=car.plate if car else "",
+                car_current_km=car.current_km if car else None,
                 date=booking.date,
                 time=booking.time,
                 address=booking.address,
