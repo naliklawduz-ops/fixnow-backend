@@ -89,7 +89,6 @@
   .toast.show { opacity: 1; transform: translateY(0); }
   .toast.error { border-color: var(--danger); }
 
-  /* Cars & Maintenance styles */
   .maint-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 150; }
   .maint-modal.open { display: flex; }
   .maint-modal-content { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 28px; width: 100%; max-width: 750px; max-height: 90vh; overflow-y: auto; }
@@ -144,6 +143,14 @@
   <div class="maint-modal-content">
     <h2 id="maint-modal-title">Maintenance Records <button class="maint-close" onclick="closeMaintModal()">✕</button></h2>
     <div id="maint-modal-body"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- Customer Bookings Modal -->
+<div class="maint-modal" id="customer-modal">
+  <div class="maint-modal-content">
+    <h2 id="customer-modal-title">Customer Bookings <button class="maint-close" onclick="closeCustomerModal()">✕</button></h2>
+    <div id="customer-modal-body"><div class="loading">Loading...</div></div>
   </div>
 </div>
 
@@ -434,9 +441,54 @@ async function loadCustomers() {
       <td>#${u.id}</td><td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.phone)}</td>
       <td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.address || "—")}</td>
       <td style="color:var(--text-dim);font-size:11px;">${u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="viewCustomerBookings(${u.id}, '${escapeHtml(u.name)}')">📋 Bookings</button></td>
     </tr>`).join("");
-    document.getElementById("tab-content").innerHTML = `<div class="card"><h2>Customers <span style="font-size:14px;color:var(--text-dim);">${users.length} total</span></h2>${users.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Address</th><th>Joined</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">No customers yet.</div>'}</div>`;
+    document.getElementById("tab-content").innerHTML = `<div class="card"><h2>Customers <span style="font-size:14px;color:var(--text-dim);">${users.length} total</span></h2>${users.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Address</th><th>Joined</th><th>History</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">No customers yet.</div>'}</div>`;
   } catch (e) { document.getElementById("tab-content").innerHTML = '<div class="empty">' + escapeHtml(e.message) + '</div>'; toast(e.message, true); }
+}
+
+async function viewCustomerBookings(userId, userName) {
+  const modal = document.getElementById("customer-modal");
+  const body = document.getElementById("customer-modal-body");
+  const title = document.getElementById("customer-modal-title");
+  body.innerHTML = '<div class="loading">Loading...</div>';
+  title.innerHTML = `${escapeHtml(userName)} — Booking History <button class="maint-close" onclick="closeCustomerModal()">✕</button>`;
+  modal.classList.add("open");
+
+  try {
+    const data = await api("/admin/users/" + userId + "/bookings");
+    if (!data.bookings.length) {
+      body.innerHTML = '<div class="empty">No bookings for this customer.</div>';
+      return;
+    }
+
+    const rows = data.bookings.map(b => {
+      const statusClass = b.status === "active" ? "active" : b.status === "completed" ? "completed" : "cancelled";
+      return `<tr>
+        <td>#${b.id}</td>
+        <td>${escapeHtml(b.service_name)}<br><span style="color:var(--gold);font-size:11px;">${b.service_price} IQD</span></td>
+        <td>${escapeHtml(b.date)} ${escapeHtml(b.time)}</td>
+        <td>${escapeHtml(b.mechanic_name || '—')}</td>
+        <td>${escapeHtml(b.car || '—')}</td>
+        <td><span class="badge ${statusClass}">${escapeHtml(b.status)}</span></td>
+      </tr>`;
+    }).join("");
+
+    body.innerHTML = `
+      <p style="color:var(--text-dim);font-size:12px;margin-bottom:12px;">Total: ${data.total} booking(s)</p>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>ID</th><th>Service</th><th>Date</th><th>Mechanic</th><th>Car</th><th>Status</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch (e) {
+    body.innerHTML = '<div class="empty" style="color:var(--danger);">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function closeCustomerModal() {
+  document.getElementById("customer-modal").classList.remove("open");
 }
 
 // ============================================================
@@ -551,7 +603,6 @@ function closeMaintModal() {
 
 async function openEditRecordModal(record) {
   closeMaintModal();
-  // Load brands for this part
   let brandsHtml = '<option value="">— No brand —</option>';
   try {
     const brands = await api("/maintenance/brands?part_id=" + record.part_id);
@@ -598,7 +649,7 @@ async function deleteRecord(recordId) {
 
 function closeModal() { document.getElementById("modal-backdrop").classList.remove("open"); document.getElementById("modal-content").innerHTML = ""; }
 document.getElementById("modal-backdrop").addEventListener("click", (e) => { if (e.target.id === "modal-backdrop") closeModal(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeMaintModal(); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeMaintModal(); closeCustomerModal(); } });
 document.getElementById("login-password").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
 document.getElementById("login-username").addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("login-password").focus(); });
 
