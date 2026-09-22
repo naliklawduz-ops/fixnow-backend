@@ -3,47 +3,46 @@ import json
 import base64
 import firebase_admin
 from firebase_admin import credentials, messaging
-from dotenv import load_dotenv
 
-load_dotenv()
-
-_firebase_initialized = False
 
 def _init_firebase():
-    global _firebase_initialized
-    if _firebase_initialized:
-        return
-    try:
-        # Try base64-encoded JSON from environment variable (Railway)
-        cred_b64 = os.getenv("FIREBASE_CREDENTIALS_B64")
-        if cred_b64:
-            cred_dict = json.loads(base64.b64decode(cred_b64).decode('utf-8'))
-            cred = credentials.Certificate(cred_dict)
-        else:
-            # Try raw JSON from environment variable
-            cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
-            if cred_json:
-                cred_dict = json.loads(cred_json)
-                cred = credentials.Certificate(cred_dict)
-            else:
-                # Fall back to file path (local)
-                cred_path = os.getenv("FIREBASE_CREDENTIALS", "firebase-service-account.json")
-                if not os.path.isabs(cred_path):
-                    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    cred_path = os.path.join(base_dir, cred_path)
-                cred = credentials.Certificate(cred_path)
+    """Initialize Firebase Admin SDK from base64-encoded env variable."""
+    if firebase_admin._apps:
+        return  # Already initialized
 
-        firebase_admin.initialize_app(cred)
-        _firebase_initialized = True
-        print("✅ Firebase Admin SDK initialized")
+    b64_creds = os.getenv("FIREBASE_CREDENTIALS_B64")
+    if not b64_creds:
+        raise RuntimeError("FIREBASE_CREDENTIALS_B64 environment variable is not set")
+
+    try:
+        decoded = base64.b64decode(b64_creds).decode("utf-8")
+        creds_dict = json.loads(decoded)
     except Exception as e:
-        print(f"⚠️ Firebase init failed: {e}")
+        raise RuntimeError(f"Failed to decode FIREBASE_CREDENTIALS_B64: {e}")
+
+    # CRITICAL FIX: Repair the private key's newlines
+    if "private_key" in creds_dict:
+        pk = creds_dict["private_key"]
+        pk = pk.replace("\\n", "\n")
+        pk = pk.replace("\r", "")
+        if "-----BEGIN PRIVATE KEY-----" not in pk:
+            raise RuntimeError("private_key is missing PEM header.")
+        creds_dict["private_key"] = pk
+
+    required = ["type", "project_id", "private_key_id", "private_key", "client_email"]
+    for field in required:
+        if field not in creds_dict:
+            raise RuntimeError(f"Firebase credentials missing required field: {field}")
+
+    cred = credentials.Certificate(creds_dict)
+    firebase_admin.initialize_app(cred)
+    print(f"✅ Firebase initialized for project: {creds_dict.get('project_id')}")
+
+
+_init_firebase()
 
 
 def send_notification(token: str, title: str, body: str, data: dict = None) -> bool:
-    _init_firebase()
-    if not _firebase_initialized:
-        return False
     try:
         message = messaging.Message(
             notification=messaging.Notification(title=title, body=body),
@@ -65,8 +64,7 @@ def send_notification(token: str, title: str, body: str, data: dict = None) -> b
 
 
 def send_multicast_notification(tokens: list, title: str, body: str, data: dict = None) -> int:
-    _init_firebase()
-    if not _firebase_initialized or not tokens:
+    if not tokens:
         return 0
     try:
         message = messaging.MulticastMessage(
