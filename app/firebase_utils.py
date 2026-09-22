@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import firebase_admin
 from firebase_admin import credentials, messaging
 from dotenv import load_dotenv
@@ -13,18 +14,24 @@ def _init_firebase():
     if _firebase_initialized:
         return
     try:
-        # First try JSON from environment variable (Railway)
-        cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
-        if cred_json:
-            cred_dict = json.loads(cred_json)
+        # Try base64-encoded JSON from environment variable (Railway)
+        cred_b64 = os.getenv("FIREBASE_CREDENTIALS_B64")
+        if cred_b64:
+            cred_dict = json.loads(base64.b64decode(cred_b64).decode('utf-8'))
             cred = credentials.Certificate(cred_dict)
         else:
-            # Fall back to file path (local)
-            cred_path = os.getenv("FIREBASE_CREDENTIALS", "firebase-service-account.json")
-            if not os.path.isabs(cred_path):
-                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                cred_path = os.path.join(base_dir, cred_path)
-            cred = credentials.Certificate(cred_path)
+            # Try raw JSON from environment variable
+            cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
+            if cred_json:
+                cred_dict = json.loads(cred_json)
+                cred = credentials.Certificate(cred_dict)
+            else:
+                # Fall back to file path (local)
+                cred_path = os.getenv("FIREBASE_CREDENTIALS", "firebase-service-account.json")
+                if not os.path.isabs(cred_path):
+                    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    cred_path = os.path.join(base_dir, cred_path)
+                cred = credentials.Certificate(cred_path)
 
         firebase_admin.initialize_app(cred)
         _firebase_initialized = True
