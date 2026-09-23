@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 import json
 import os
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import InvalidTokenError
 
 from ..database import get_db
 from .. import models, schemas
@@ -45,7 +46,7 @@ def get_sender_info(
                 "name": mechanic.name if mechanic else "Mechanic",
                 "booking_owner": False,
             }
-    except JWTError:
+    except InvalidTokenError:
         pass
 
     raise HTTPException(
