@@ -1,6 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import os
 
 from .database import engine, Base, SessionLocal
@@ -24,17 +28,33 @@ try:
 except Exception as e:
     print(f"⚠️ Admin seed skipped: {e}")
 
+# ─── Rate limiter ─────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="FIX.NOW API",
     description="On-demand service booking app",
     version="1.0.0",
+    docs_url=None,      # ← Disable /docs
+    redoc_url=None,     # ← Disable /redoc
+    openapi_url=None,   # ← Disable /openapi.json
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ─── CORS ────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://fixnow-backend-production-f6af.up.railway.app",
+        "http://localhost",
+        "http://localhost:8080",
+        "http://10.0.2.2",        # Android emulator
+        "http://10.0.2.2:8000",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 

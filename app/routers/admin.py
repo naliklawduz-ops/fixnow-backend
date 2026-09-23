@@ -191,6 +191,23 @@ def admin_me(current_admin: models.Admin = Depends(get_current_admin)):
     return {"id": current_admin.id, "username": current_admin.username}
 
 
+@router.put("/change-password")
+def admin_change_password(
+    payload: dict = Body(...),
+    current_admin: models.Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    current_password = payload.get("current_password", "")
+    new_password = payload.get("new_password", "")
+    if not verify_password(current_password, current_admin.password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    current_admin.password = hash_password(new_password)
+    db.commit()
+    return {"success": True, "message": "Password changed successfully"}
+
+
 # ─── Stats ────────────────────────────────────────────────────
 @router.get("/stats", response_model=StatsOut)
 def admin_stats(
