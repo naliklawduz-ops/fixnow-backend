@@ -40,6 +40,15 @@ class Car(Base):
     )
 
 
+class ServiceCategory(Base):
+    __tablename__ = "service_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False, index=True)
+    icon = Column(String, nullable=True, default="🔧")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Service(Base):
     __tablename__ = "services"
 

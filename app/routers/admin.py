@@ -25,12 +25,26 @@ class AdminLoginRequest(BaseModel):
     username: str
     password: str
 
-
 class AdminLoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     username: str
 
+class CategoryCreate(BaseModel):
+    name: str
+    icon: Optional[str] = "🔧"
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    icon: Optional[str] = None
+
+class CategoryOut(BaseModel):
+    id: int
+    name: str
+    icon: Optional[str] = "🔧"
+    created_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
 
 class ServiceCreate(BaseModel):
     category: str
@@ -38,13 +52,11 @@ class ServiceCreate(BaseModel):
     description: Optional[str] = None
     price: int
 
-
 class ServiceUpdate(BaseModel):
     category: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
     price: Optional[int] = None
-
 
 class ServiceOut(BaseModel):
     id: int
@@ -52,10 +64,8 @@ class ServiceOut(BaseModel):
     name: str
     description: Optional[str] = ""
     price: int
-
     class Config:
         from_attributes = True
-
 
 class MechanicCreate(BaseModel):
     name: str
@@ -66,7 +76,6 @@ class MechanicCreate(BaseModel):
     is_available: bool = True
     rating: float = 5.0
 
-
 class MechanicUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
@@ -75,7 +84,6 @@ class MechanicUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_available: Optional[bool] = None
     rating: Optional[float] = None
-
 
 class MechanicOut(BaseModel):
     id: int
@@ -86,10 +94,8 @@ class MechanicOut(BaseModel):
     is_available: bool
     rating: float
     created_at: Optional[datetime] = None
-
     class Config:
         from_attributes = True
-
 
 class BookingOut(BaseModel):
     id: int
@@ -110,10 +116,8 @@ class BookingOut(BaseModel):
     notes: Optional[str] = ""
     created_at: Optional[datetime] = None
 
-
 class AssignMechanicRequest(BaseModel):
     mechanic_id: int
-
 
 class UserOut(BaseModel):
     id: int
@@ -122,10 +126,8 @@ class UserOut(BaseModel):
     email: str
     address: Optional[str] = ""
     created_at: Optional[datetime] = None
-
     class Config:
         from_attributes = True
-
 
 class StatsOut(BaseModel):
     total_bookings: int
@@ -178,18 +180,13 @@ def auto_link_parts(service: models.Service, db: Session) -> None:
 def admin_login(payload: AdminLoginRequest, db: Session = Depends(get_db)):
     admin = db.query(models.Admin).filter(models.Admin.username == payload.username).first()
     if not admin or not verify_password(payload.password, admin.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
     token = create_admin_token(admin.id, admin.username)
     return AdminLoginResponse(access_token=token, username=admin.username)
-
 
 @router.get("/me")
 def admin_me(current_admin: models.Admin = Depends(get_current_admin)):
     return {"id": current_admin.id, "username": current_admin.username}
-
 
 @router.put("/change-password")
 def admin_change_password(
@@ -206,6 +203,70 @@ def admin_change_password(
     current_admin.password = hash_password(new_password)
     db.commit()
     return {"success": True, "message": "Password changed successfully"}
+
+
+# ─── Categories ───────────────────────────────────────────────
+@router.get("/categories", response_model=List[CategoryOut])
+def list_categories(
+    db: Session = Depends(get_db),
+    current_admin: models.Admin = Depends(get_current_admin),
+):
+    return db.query(models.ServiceCategory).order_by(models.ServiceCategory.name).all()
+
+@router.post("/categories", response_model=CategoryOut)
+def create_category(
+    payload: CategoryCreate,
+    db: Session = Depends(get_db),
+    current_admin: models.Admin = Depends(get_current_admin),
+):
+    existing = db.query(models.ServiceCategory).filter(models.ServiceCategory.name == payload.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Category already exists")
+    cat = models.ServiceCategory(name=payload.name, icon=payload.icon or "🔧")
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+@router.put("/categories/{cat_id}", response_model=CategoryOut)
+def update_category(
+    cat_id: int,
+    payload: CategoryUpdate,
+    db: Session = Depends(get_db),
+    current_admin: models.Admin = Depends(get_current_admin),
+):
+    cat = db.query(models.ServiceCategory).filter(models.ServiceCategory.id == cat_id).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    old_name = cat.name
+    if payload.name is not None and payload.name != old_name:
+        clash = db.query(models.ServiceCategory).filter(models.ServiceCategory.name == payload.name).first()
+        if clash:
+            raise HTTPException(status_code=400, detail="Category name already exists")
+        # Update all services with old category name
+        db.query(models.Service).filter(models.Service.category == old_name).update({models.Service.category: payload.name})
+        cat.name = payload.name
+    if payload.icon is not None:
+        cat.icon = payload.icon
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+@router.delete("/categories/{cat_id}")
+def delete_category(
+    cat_id: int,
+    db: Session = Depends(get_db),
+    current_admin: models.Admin = Depends(get_current_admin),
+):
+    cat = db.query(models.ServiceCategory).filter(models.ServiceCategory.id == cat_id).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    service_count = db.query(func.count(models.Service.id)).filter(models.Service.category == cat.name).scalar() or 0
+    if service_count > 0:
+        raise HTTPException(status_code=400, detail=f"Cannot delete: {service_count} service(s) use this category")
+    db.delete(cat)
+    db.commit()
+    return {"ok": True, "deleted_id": cat_id}
 
 
 # ─── Stats ────────────────────────────────────────────────────
@@ -252,26 +313,19 @@ def list_bookings(
         service = b.service
         mechanic = b.mechanic
         out.append(BookingOut(
-            id=b.id,
-            user_id=b.user_id,
+            id=b.id, user_id=b.user_id,
             customer_name=customer.name if customer and customer.name else "",
             customer_phone=customer.phone if customer and customer.phone else "",
             customer_address=customer.address if customer and customer.address else "",
             service_id=b.service_id,
             service_name=service.name if service and service.name else "",
             service_price=service.price if service and service.price else 0,
-            car_id=b.car_id,
-            assigned_mechanic_id=b.assigned_mechanic_id,
+            car_id=b.car_id, assigned_mechanic_id=b.assigned_mechanic_id,
             mechanic_name=mechanic.name if mechanic and mechanic.name else "",
-            date=b.date or "",
-            time=b.time or "",
-            address=b.address or "",
-            status=b.status or "",
-            notes=b.notes or "",
-            created_at=b.created_at,
+            date=b.date or "", time=b.time or "", address=b.address or "",
+            status=b.status or "", notes=b.notes or "", created_at=b.created_at,
         ))
     return out
-
 
 @router.put("/bookings/{booking_id}/assign", response_model=BookingOut)
 def assign_mechanic(
@@ -290,47 +344,32 @@ def assign_mechanic(
     db.commit()
     db.refresh(booking)
 
-    # ── Notify mechanic about new assignment ──
     if mechanic.fcm_token:
         service = db.query(models.Service).filter(models.Service.id == booking.service_id).first()
-        send_notification(
-            token=mechanic.fcm_token,
-            title="🔧 New Job Assigned",
+        send_notification(token=mechanic.fcm_token, title="🔧 New Job Assigned",
             body=f"You have been assigned: {service.name if service else 'a service'} at {booking.address}",
-            data={"booking_id": str(booking.id), "type": "assigned"},
-        )
+            data={"booking_id": str(booking.id), "type": "assigned"})
 
-    # ── Notify customer that mechanic is assigned ──
     customer = booking.customer
     if customer and customer.fcm_token:
-        send_notification(
-            token=customer.fcm_token,
-            title="✅ Mechanic Assigned",
+        send_notification(token=customer.fcm_token, title="✅ Mechanic Assigned",
             body=f"{mechanic.name} will handle your booking on {booking.date} at {booking.time}",
-            data={"booking_id": str(booking.id), "type": "mechanic_assigned"},
-        )
+            data={"booking_id": str(booking.id), "type": "mechanic_assigned"})
 
     service = booking.service
     return BookingOut(
-        id=booking.id,
-        user_id=booking.user_id,
+        id=booking.id, user_id=booking.user_id,
         customer_name=customer.name if customer and customer.name else "",
         customer_phone=customer.phone if customer and customer.phone else "",
         customer_address=customer.address if customer and customer.address else "",
         service_id=booking.service_id,
         service_name=service.name if service and service.name else "",
         service_price=service.price if service and service.price else 0,
-        car_id=booking.car_id,
-        assigned_mechanic_id=booking.assigned_mechanic_id,
+        car_id=booking.car_id, assigned_mechanic_id=booking.assigned_mechanic_id,
         mechanic_name=mechanic.name or "",
-        date=booking.date or "",
-        time=booking.time or "",
-        address=booking.address or "",
-        status=booking.status or "",
-        notes=booking.notes or "",
-        created_at=booking.created_at,
+        date=booking.date or "", time=booking.time or "", address=booking.address or "",
+        status=booking.status or "", notes=booking.notes or "", created_at=booking.created_at,
     )
-
 
 @router.put("/bookings/{booking_id}/cancel", response_model=BookingOut)
 def cancel_booking(
@@ -348,98 +387,60 @@ def cancel_booking(
     service = booking.service
     mechanic = booking.mechanic
     return BookingOut(
-        id=booking.id,
-        user_id=booking.user_id,
+        id=booking.id, user_id=booking.user_id,
         customer_name=customer.name if customer and customer.name else "",
         customer_phone=customer.phone if customer and customer.phone else "",
         customer_address=customer.address if customer and customer.address else "",
         service_id=booking.service_id,
         service_name=service.name if service and service.name else "",
         service_price=service.price if service and service.price else 0,
-        car_id=booking.car_id,
-        assigned_mechanic_id=booking.assigned_mechanic_id,
+        car_id=booking.car_id, assigned_mechanic_id=booking.assigned_mechanic_id,
         mechanic_name=mechanic.name if mechanic and mechanic.name else "",
-        date=booking.date or "",
-        time=booking.time or "",
-        address=booking.address or "",
-        status=booking.status or "",
-        notes=booking.notes or "",
-        created_at=booking.created_at,
+        date=booking.date or "", time=booking.time or "", address=booking.address or "",
+        status=booking.status or "", notes=booking.notes or "", created_at=booking.created_at,
     )
 
 
 # ─── Mechanics ────────────────────────────────────────────────
 @router.get("/mechanics", response_model=List[MechanicOut])
-def list_mechanics(
-    db: Session = Depends(get_db),
-    current_admin: models.Admin = Depends(get_current_admin),
-):
+def list_mechanics(db: Session = Depends(get_db), current_admin: models.Admin = Depends(get_current_admin)):
     return db.query(models.Mechanic).order_by(models.Mechanic.id.desc()).all()
 
-
 @router.post("/mechanics", response_model=MechanicOut)
-def create_mechanic(
-    payload: MechanicCreate,
-    db: Session = Depends(get_db),
-    current_admin: models.Admin = Depends(get_current_admin),
-):
+def create_mechanic(payload: MechanicCreate, db: Session = Depends(get_db), current_admin: models.Admin = Depends(get_current_admin)):
     existing = db.query(models.Mechanic).filter(models.Mechanic.phone == payload.phone).first()
     if existing:
         raise HTTPException(status_code=400, detail="Phone already registered")
-    mechanic = models.Mechanic(
-        name=payload.name,
-        phone=payload.phone,
-        password=hash_password(payload.password),
-        access_code=payload.access_code,
-        is_active=payload.is_active,
-        is_available=payload.is_available,
-        rating=payload.rating,
-    )
+    mechanic = models.Mechanic(name=payload.name, phone=payload.phone, password=hash_password(payload.password),
+        access_code=payload.access_code, is_active=payload.is_active, is_available=payload.is_available, rating=payload.rating)
     db.add(mechanic)
     db.commit()
     db.refresh(mechanic)
     return mechanic
 
-
 @router.put("/mechanics/{mechanic_id}", response_model=MechanicOut)
-def update_mechanic(
-    mechanic_id: int,
-    payload: MechanicUpdate,
-    db: Session = Depends(get_db),
-    current_admin: models.Admin = Depends(get_current_admin),
-):
+def update_mechanic(mechanic_id: int, payload: MechanicUpdate, db: Session = Depends(get_db), current_admin: models.Admin = Depends(get_current_admin)):
     mechanic = db.query(models.Mechanic).filter(models.Mechanic.id == mechanic_id).first()
     if not mechanic:
         raise HTTPException(status_code=404, detail="Mechanic not found")
-    if payload.name is not None:
-        mechanic.name = payload.name
+    if payload.name is not None: mechanic.name = payload.name
     if payload.phone is not None:
         if payload.phone != mechanic.phone:
             clash = db.query(models.Mechanic).filter(models.Mechanic.phone == payload.phone).first()
             if clash:
                 raise HTTPException(status_code=400, detail="Phone already registered")
         mechanic.phone = payload.phone
-    if payload.password is not None and payload.password != "":
-        mechanic.password = hash_password(payload.password)
-    if payload.access_code is not None:
-        mechanic.access_code = payload.access_code
-    if payload.is_active is not None:
-        mechanic.is_active = payload.is_active
-    if payload.is_available is not None:
-        mechanic.is_available = payload.is_available
-    if payload.rating is not None:
-        mechanic.rating = payload.rating
+    if payload.password is not None and payload.password != "": mechanic.password = hash_password(payload.password)
+    if payload.access_code is not None: mechanic.access_code = payload.access_code
+    if payload.is_active is not None: mechanic.is_active = payload.is_active
+    if payload.is_available is not None: mechanic.is_available = payload.is_available
+    if payload.rating is not None: mechanic.rating = payload.rating
     db.commit()
     db.refresh(mechanic)
     return mechanic
 
-
 @router.delete("/mechanics/{mechanic_id}")
-def delete_mechanic(
-    mechanic_id: int,
-    db: Session = Depends(get_db),
-    current_admin: models.Admin = Depends(get_current_admin),
-):
+def delete_mechanic(mechanic_id: int, db: Session = Depends(get_db), current_admin: models.Admin = Depends(get_current_admin)):
     mechanic = db.query(models.Mechanic).filter(models.Mechanic.id == mechanic_id).first()
     if not mechanic:
         raise HTTPException(status_code=404, detail="Mechanic not found")
@@ -451,62 +452,34 @@ def delete_mechanic(
 
 # ─── Services ─────────────────────────────────────────────────
 @router.get("/services", response_model=List[ServiceOut])
-def list_services(
-    db: Session = Depends(get_db),
-    current_admin: models.Admin = Depends(get_current_admin),
-):
+def list_services(db: Session = Depends(get_db), current_admin: models.Admin = Depends(get_current_admin)):
     return db.query(models.Service).order_by(models.Service.category, models.Service.id).all()
 
-
 @router.post("/services", response_model=ServiceOut)
-def create_service(
-    payload: ServiceCreate,
-    db: Session = Depends(get_db),
-    current_admin: models.Admin = Depends(get_current_admin),
-):
-    service = models.Service(
-        category=payload.category,
-        name=payload.name,
-        description=payload.description or "",
-        price=payload.price,
-    )
+def create_service(payload: ServiceCreate, db: Session = Depends(get_db), current_admin: models.Admin = Depends(get_current_admin)):
+    service = models.Service(category=payload.category, name=payload.name, description=payload.description or "", price=payload.price)
     db.add(service)
     db.commit()
     db.refresh(service)
     auto_link_parts(service, db)
     return service
 
-
 @router.put("/services/{service_id}", response_model=ServiceOut)
-def update_service(
-    service_id: int,
-    payload: ServiceUpdate,
-    db: Session = Depends(get_db),
-    current_admin: models.Admin = Depends(get_current_admin),
-):
+def update_service(service_id: int, payload: ServiceUpdate, db: Session = Depends(get_db), current_admin: models.Admin = Depends(get_current_admin)):
     service = db.query(models.Service).filter(models.Service.id == service_id).first()
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
-    if payload.category is not None:
-        service.category = payload.category
-    if payload.name is not None:
-        service.name = payload.name
-    if payload.description is not None:
-        service.description = payload.description
-    if payload.price is not None:
-        service.price = payload.price
+    if payload.category is not None: service.category = payload.category
+    if payload.name is not None: service.name = payload.name
+    if payload.description is not None: service.description = payload.description
+    if payload.price is not None: service.price = payload.price
     db.commit()
     db.refresh(service)
     auto_link_parts(service, db)
     return service
 
-
 @router.delete("/services/{service_id}")
-def delete_service(
-    service_id: int,
-    db: Session = Depends(get_db),
-    current_admin: models.Admin = Depends(get_current_admin),
-):
+def delete_service(service_id: int, db: Session = Depends(get_db), current_admin: models.Admin = Depends(get_current_admin)):
     service = db.query(models.Service).filter(models.Service.id == service_id).first()
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
@@ -520,30 +493,15 @@ def delete_service(
 
 # ─── Customers ────────────────────────────────────────────────
 @router.get("/users", response_model=List[UserOut])
-def list_users(
-    db: Session = Depends(get_db),
-    current_admin: models.Admin = Depends(get_current_admin),
-):
+def list_users(db: Session = Depends(get_db), current_admin: models.Admin = Depends(get_current_admin)):
     return db.query(models.User).order_by(models.User.id.desc()).all()
 
-
 @router.get("/users/{user_id}/bookings")
-def get_user_bookings(
-    user_id: int,
-    current_admin: models.Admin = Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
+def get_user_bookings(user_id: int, current_admin: models.Admin = Depends(get_current_admin), db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Customer not found")
-
-    bookings = (
-        db.query(models.Booking)
-        .filter(models.Booking.user_id == user_id)
-        .order_by(models.Booking.created_at.desc())
-        .all()
-    )
-
+    bookings = db.query(models.Booking).filter(models.Booking.user_id == user_id).order_by(models.Booking.created_at.desc()).all()
     result = []
     for b in bookings:
         service = b.service
@@ -556,24 +514,11 @@ def get_user_bookings(
             "service_price": service.price if service else 0,
             "mechanic_name": mechanic.name if mechanic else "Not assigned",
             "car": f"{car.brand} {car.model} ({car.plate})" if car else "No car",
-            "date": b.date,
-            "time": b.time,
-            "address": b.address,
-            "status": b.status,
-            "notes": b.notes or "",
+            "date": b.date, "time": b.time, "address": b.address,
+            "status": b.status, "notes": b.notes or "",
             "created_at": b.created_at.isoformat() if b.created_at else None,
         })
-
-    return {
-        "customer": {
-            "id": user.id,
-            "name": user.name,
-            "phone": user.phone,
-            "email": user.email,
-        },
-        "bookings": result,
-        "total": len(result),
-    }
+    return {"customer": {"id": user.id, "name": user.name, "phone": user.phone, "email": user.email}, "bookings": result, "total": len(result)}
 
 
 # ─── Seed default admin ───────────────────────────────────────
@@ -581,10 +526,7 @@ def seed_default_admin(db: Session) -> None:
     existing = db.query(models.Admin).first()
     if existing:
         return
-    admin = models.Admin(
-        username="fixnow_admin",
-        password=hash_password("FXN@admin2026"),
-    )
+    admin = models.Admin(username="fixnow_admin", password=hash_password("FXN@admin2026"))
     db.add(admin)
     db.commit()
     print("✅ Seeded default admin: fixnow_admin")
@@ -592,39 +534,26 @@ def seed_default_admin(db: Session) -> None:
 
 # ─── Cars & Maintenance ───────────────────────────────────────
 @router.get("/cars")
-def admin_list_cars(
-    current_admin=Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
+def admin_list_cars(current_admin=Depends(get_current_admin), db: Session = Depends(get_db)):
     cars = db.query(Car).order_by(Car.id.desc()).all()
     result = []
     for car in cars:
         owner = db.query(User).filter(User.id == car.user_id).first()
         result.append({
-            "id": car.id,
-            "owner_id": car.user_id,
+            "id": car.id, "owner_id": car.user_id,
             "owner_name": owner.name if owner else "Unknown",
             "owner_phone": owner.phone if owner else "",
             "owner_email": owner.email if owner else "",
-            "brand": car.brand,
-            "model": car.model,
-            "year": car.year,
-            "color": car.color,
-            "plate": car.plate,
+            "brand": car.brand, "model": car.model, "year": car.year,
+            "color": car.color, "plate": car.plate,
             "current_km": car.current_km,
             "estimated_km_per_month": car.estimated_km_per_month,
             "created_at": car.created_at.isoformat() if car.created_at else None,
         })
     return result
 
-
 @router.put("/cars/{car_id}/km")
-def admin_update_car_km(
-    car_id: int,
-    payload: CarKmUpdate,
-    current_admin=Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
+def admin_update_car_km(car_id: int, payload: CarKmUpdate, current_admin=Depends(get_current_admin), db: Session = Depends(get_db)):
     car = db.query(Car).filter(Car.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="Car not found")
@@ -633,100 +562,55 @@ def admin_update_car_km(
         car.estimated_km_per_month = payload.estimated_km_per_month
     db.commit()
     db.refresh(car)
-    return {
-        "success": True,
-        "message": "Car km updated",
-        "car_id": car.id,
-        "current_km": car.current_km,
-        "estimated_km_per_month": car.estimated_km_per_month,
-    }
-
+    return {"success": True, "message": "Car km updated", "car_id": car.id, "current_km": car.current_km, "estimated_km_per_month": car.estimated_km_per_month}
 
 @router.get("/cars/{car_id}/maintenance")
-def admin_get_car_maintenance(
-    car_id: int,
-    current_admin=Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
+def admin_get_car_maintenance(car_id: int, current_admin=Depends(get_current_admin), db: Session = Depends(get_db)):
     car = db.query(Car).filter(Car.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="Car not found")
-
     owner = db.query(User).filter(User.id == car.user_id).first()
-    records = (
-        db.query(CarMaintenance)
-        .filter(CarMaintenance.car_id == car_id)
-        .order_by(CarMaintenance.part_id.asc())
-        .all()
-    )
-
+    records = db.query(CarMaintenance).filter(CarMaintenance.car_id == car_id).order_by(CarMaintenance.part_id.asc()).all()
     record_list = []
     for record in records:
         part = db.query(MaintenancePart).filter(MaintenancePart.id == record.part_id).first()
         brand = None
         if record.last_changed_brand_id:
-            brand = db.query(MaintenanceBrand).filter(
-                MaintenanceBrand.id == record.last_changed_brand_id
-            ).first()
+            brand = db.query(MaintenanceBrand).filter(MaintenanceBrand.id == record.last_changed_brand_id).first()
         record_list.append({
-            "id": record.id,
-            "car_id": record.car_id,
-            "part_id": record.part_id,
+            "id": record.id, "car_id": record.car_id, "part_id": record.part_id,
             "part_name": part.name if part else "Unknown",
             "last_changed_km": record.last_changed_km,
             "last_changed_brand_id": record.last_changed_brand_id,
             "last_changed_brand_name": brand.brand_name if brand else None,
             "last_changed_at": record.last_changed_at.isoformat() if record.last_changed_at else None,
-            "next_change_km": record.next_change_km,
-            "source": record.source,
+            "next_change_km": record.next_change_km, "source": record.source,
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         })
-
-    return {
-        "car": {
-            "id": car.id,
-            "brand": car.brand,
-            "model": car.model,
-            "year": car.year,
-            "color": car.color,
-            "plate": car.plate,
-            "current_km": car.current_km,
-            "owner_name": owner.name if owner else "Unknown",
-            "owner_phone": owner.phone if owner else "",
-        },
-        "records": record_list,
-    }
-
+    return {"car": {"id": car.id, "brand": car.brand, "model": car.model, "year": car.year,
+        "color": car.color, "plate": car.plate, "current_km": car.current_km,
+        "owner_name": owner.name if owner else "Unknown", "owner_phone": owner.phone if owner else ""},
+        "records": record_list}
 
 @router.put("/maintenance-records/{record_id}")
-def admin_update_maintenance_record(
-    record_id: int,
-    payload: dict = Body(...),
-    current_admin=Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
+def admin_update_maintenance_record(record_id: int, payload: dict = Body(...), current_admin=Depends(get_current_admin), db: Session = Depends(get_db)):
     record = db.query(CarMaintenance).filter(CarMaintenance.id == record_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="Maintenance record not found")
-
     if "last_changed_km" in payload and payload["last_changed_km"] is not None:
         try:
             value = int(payload["last_changed_km"])
-            if value < 0:
-                raise ValueError
+            if value < 0: raise ValueError
             record.last_changed_km = value
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="last_changed_km must be a non-negative integer")
-
     if "next_change_km" in payload and payload["next_change_km"] is not None:
         try:
             value = int(payload["next_change_km"])
-            if value < 0:
-                raise ValueError
+            if value < 0: raise ValueError
             record.next_change_km = value
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="next_change_km must be a non-negative integer")
-
     if "brand_id" in payload:
         brand_id = payload["brand_id"]
         if brand_id is None:
@@ -742,34 +626,18 @@ def admin_update_maintenance_record(
             if brand.part_id != record.part_id:
                 raise HTTPException(status_code=400, detail="Brand does not belong to this part")
             record.last_changed_brand_id = brand_id
-
     record.source = "admin"
     db.commit()
     db.refresh(record)
-
-    return {
-        "success": True,
-        "message": "Maintenance record updated",
-        "record_id": record.id,
-        "last_changed_km": record.last_changed_km,
-        "next_change_km": record.next_change_km,
-        "last_changed_brand_id": record.last_changed_brand_id,
-    }
-
+    return {"success": True, "message": "Maintenance record updated", "record_id": record.id,
+        "last_changed_km": record.last_changed_km, "next_change_km": record.next_change_km,
+        "last_changed_brand_id": record.last_changed_brand_id}
 
 @router.delete("/maintenance-records/{record_id}")
-def admin_delete_maintenance_record(
-    record_id: int,
-    current_admin=Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
+def admin_delete_maintenance_record(record_id: int, current_admin=Depends(get_current_admin), db: Session = Depends(get_db)):
     record = db.query(CarMaintenance).filter(CarMaintenance.id == record_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="Maintenance record not found")
     db.delete(record)
     db.commit()
-    return {
-        "success": True,
-        "message": "Maintenance record deleted",
-        "record_id": record_id,
-    }
+    return {"success": True, "message": "Maintenance record deleted", "record_id": record_id}
