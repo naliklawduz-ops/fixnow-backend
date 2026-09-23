@@ -46,13 +46,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ─── CORS ────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://fixnow-backend-production-f6af.up.railway.app",
-        "http://localhost",
-        "http://localhost:8080",
-        "http://10.0.2.2",        # Android emulator
-        "http://10.0.2.2:8000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
