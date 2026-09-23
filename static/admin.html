@@ -128,6 +128,7 @@
     <button data-tab="dashboard" class="active" onclick="switchTab('dashboard')">Dashboard</button>
     <button data-tab="bookings" onclick="switchTab('bookings')">Bookings</button>
     <button data-tab="mechanics" onclick="switchTab('mechanics')">Mechanics</button>
+    <button data-tab="categories" onclick="switchTab('categories')">Categories</button>
     <button data-tab="services" onclick="switchTab('services')">Services</button>
     <button data-tab="customers" onclick="switchTab('customers')">Customers</button>
     <button data-tab="cars" onclick="switchTab('cars')">Cars & Maintenance</button>
@@ -248,6 +249,7 @@ function switchTab(tab) {
   if (tab === "dashboard") loadDashboard();
   else if (tab === "bookings") loadBookings();
   else if (tab === "mechanics") loadMechanics();
+  else if (tab === "categories") loadCategories();
   else if (tab === "services") loadServices();
   else if (tab === "customers") loadCustomers();
   else if (tab === "cars") loadCars();
@@ -378,10 +380,59 @@ async function deleteMechanic(id) {
   catch (e) { toast(e.message, true); }
 }
 
+async function loadCategories() {
+  try {
+    const cats = await api("/admin/categories");
+    state.cache.categories = cats;
+    const rows = cats.map(c => `<tr>
+      <td>#${c.id}</td>
+      <td style="font-size:20px;">${escapeHtml(c.icon || "🔧")}</td>
+      <td>${escapeHtml(c.name)}</td>
+      <td><div class="row-actions">
+        <button class="btn btn-ghost btn-sm" onclick='editCategory(${JSON.stringify(c).replace(/'/g, "&apos;")})'>Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCategory(${c.id})">Delete</button>
+      </div></td>
+    </tr>`).join("");
+    document.getElementById("tab-content").innerHTML = `<div class="card"><h2>Categories <button class="btn btn-sm" onclick="openCategoryModal()">+ Add Category</button></h2>${cats.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>ID</th><th>Icon</th><th>Name</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : "<div class=\"empty\">No categories yet.</div>"}</div>`;
+  } catch (e) { document.getElementById("tab-content").innerHTML = "<div class=\"empty\">" + escapeHtml(e.message) + "</div>"; toast(e.message, true); }
+}
+
+function openCategoryModal(cat) {
+  const isEdit = !!cat;
+  const c = cat || { name: "", icon: "🔧" };
+  document.getElementById("modal-content").innerHTML = `<h2>${isEdit ? "Edit" : "Add"} Category</h2>
+    <div class="field"><label>Icon (emoji)</label><input id="c-icon" value="${escapeHtml(c.icon || "🔧")}" style="font-size:20px;" /></div>
+    <div class="field"><label>Name</label><input id="c-name" value="${escapeHtml(c.name)}" /></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveCategory(${isEdit ? c.id : "null"})">${isEdit ? "Save" : "Create"}</button>
+    </div>`;
+  document.getElementById("modal-backdrop").classList.add("open");
+}
+
+function editCategory(c) { openCategoryModal(c); }
+
+async function saveCategory(id) {
+  const body = { name: document.getElementById("c-name").value.trim(), icon: document.getElementById("c-icon").value.trim() || "🔧" };
+  if (!body.name) { toast("Category name required", true); return; }
+  try {
+    if (id) { await api("/admin/categories/" + id, { method: "PUT", body: JSON.stringify(body) }); toast("Category updated"); }
+    else { await api("/admin/categories", { method: "POST", body: JSON.stringify(body) }); toast("Category created"); }
+    closeModal(); loadCategories();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteCategory(id) {
+  if (!confirm("Delete this category?")) return;
+  try { await api("/admin/categories/" + id, { method: "DELETE" }); toast("Category deleted"); loadCategories(); }
+  catch (e) { toast(e.message, true); }
+}
+
 async function loadServices() {
   try {
-    const services = await api("/admin/services");
+    const [services, cats] = await Promise.all([api("/admin/services"), api("/admin/categories")]);
     state.cache.services = services;
+    state.cache.categories = cats;
     const rows = services.map(s => `<tr>
       <td>#${s.id}</td><td>${escapeHtml(s.category)}</td><td>${escapeHtml(s.name)}</td>
       <td style="color:var(--text-dim);font-size:12px;">${escapeHtml(s.description || "")}</td>
@@ -391,21 +442,26 @@ async function loadServices() {
         <button class="btn btn-danger btn-sm" onclick="deleteService(${s.id})">Delete</button>
       </div></td>
     </tr>`).join("");
-    document.getElementById("tab-content").innerHTML = `<div class="card"><h2>Services <button class="btn btn-sm" onclick="openServiceModal()">+ Add Service</button></h2>${services.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>ID</th><th>Category</th><th>Name</th><th>Description</th><th>Price (IQD)</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">No services yet.</div>'}</div>`;
-  } catch (e) { document.getElementById("tab-content").innerHTML = '<div class="empty">' + escapeHtml(e.message) + '</div>'; toast(e.message, true); }
+    document.getElementById("tab-content").innerHTML = `<div class="card"><h2>Services <button class="btn btn-sm" onclick="openServiceModal()">+ Add Service</button></h2>${services.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>ID</th><th>Category</th><th>Name</th><th>Description</th><th>Price (IQD)</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : "<div class=\"empty\">No services yet.</div>"}</div>`;
+  } catch (e) { document.getElementById("tab-content").innerHTML = "<div class=\"empty\">" + escapeHtml(e.message) + "</div>"; toast(e.message, true); }
 }
 
-function openServiceModal(service) {
+async function openServiceModal(service) {
   const isEdit = !!service;
   const s = service || { category: "", name: "", description: "", price: 0 };
+  let cats = state.cache.categories || [];
+  if (!cats.length) {
+    try { cats = await api("/admin/categories"); state.cache.categories = cats; } catch(e) {}
+  }
+  const catOptions = cats.map(c => `<option value="${escapeHtml(c.name)}" ${c.name === s.category ? "selected" : ""}>${escapeHtml(c.icon || "")} ${escapeHtml(c.name)}</option>`).join("");
   document.getElementById("modal-content").innerHTML = `<h2>${isEdit ? "Edit" : "Add"} Service</h2>
-    <div class="field"><label>Category</label><input id="s-cat" value="${escapeHtml(s.category)}" /></div>
+    <div class="field"><label>Category</label><select id="s-cat">${catOptions || "<option value=\"\">— Add categories first —</option>"}</select></div>
     <div class="field"><label>Name</label><input id="s-name" value="${escapeHtml(s.name)}" /></div>
     <div class="field"><label>Description</label><textarea id="s-desc" rows="3">${escapeHtml(s.description || "")}</textarea></div>
     <div class="field"><label>Price (IQD)</label><input id="s-price" type="number" value="${s.price}" /></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" onclick="saveService(${isEdit ? s.id : 'null'})">${isEdit ? "Save" : "Create"}</button>
+      <button class="btn" onclick="saveService(${isEdit ? s.id : "null"})">${isEdit ? "Save" : "Create"}</button>
     </div>`;
   document.getElementById("modal-backdrop").classList.add("open");
 }
