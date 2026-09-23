@@ -120,6 +120,7 @@
     <div class="brand">FIX<span>.NOW</span> <span style="font-size:14px;color:var(--text-dim);letter-spacing:3px;">ADMIN</span></div>
     <div class="right">
       <span id="admin-name"></span>
+      <button class="btn btn-ghost btn-sm" onclick="openChangePassword()">🔑 Password</button>
       <button class="btn btn-ghost btn-sm" onclick="doLogout()">Logout</button>
     </div>
   </header>
@@ -644,6 +645,33 @@ async function deleteRecord(recordId) {
     await api("/admin/maintenance-records/" + recordId, { method: "DELETE" });
     toast("Record deleted");
     if (_maintCarId) viewMaintenance(_maintCarId);
+  } catch (e) { toast(e.message, true); }
+}
+
+function openChangePassword() {
+  document.getElementById("modal-content").innerHTML = `
+    <h2>Change Password</h2>
+    <div class="field"><label>Current Password</label><input id="cp-current" type="password" /></div>
+    <div class="field"><label>New Password</label><input id="cp-new" type="password" /></div>
+    <div class="field"><label>Confirm New Password</label><input id="cp-confirm" type="password" /></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveChangePassword()">Save</button>
+    </div>`;
+  document.getElementById("modal-backdrop").classList.add("open");
+}
+
+async function saveChangePassword() {
+  const current = document.getElementById("cp-current").value;
+  const newPass = document.getElementById("cp-new").value;
+  const confirm = document.getElementById("cp-confirm").value;
+  if (!current || !newPass || !confirm) { toast("Fill all fields", true); return; }
+  if (newPass !== confirm) { toast("New passwords don't match", true); return; }
+  if (newPass.length < 6) { toast("Password must be at least 6 characters", true); return; }
+  try {
+    await api("/admin/change-password", { method: "PUT", body: JSON.stringify({ current_password: current, new_password: newPass }) });
+    toast("Password changed successfully");
+    closeModal();
   } catch (e) { toast(e.message, true); }
 }
 
