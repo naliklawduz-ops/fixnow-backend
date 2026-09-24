@@ -65,6 +65,12 @@ def auto_link_parts(service: models.Service, db: Session) -> None:
 # CUSTOMER ENDPOINTS
 # ============================================================
 
+@router.get("/categories")
+def get_categories(db: Session = Depends(get_db)):
+    cats = db.query(models.ServiceCategory).order_by(models.ServiceCategory.name).all()
+    return [{"id": c.id, "name": c.name, "icon": c.icon or "🔧"} for c in cats]
+
+
 @router.get("/", response_model=List[schemas.ServiceResponse])
 def get_all_services(db: Session = Depends(get_db)):
     services = db.query(models.Service).all()
